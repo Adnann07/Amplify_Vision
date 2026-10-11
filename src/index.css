@@ -1,0 +1,70 @@
+@import 'tailwindcss';
+
+:root {
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  color: #e2e8f0;
+  background: #020912;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color-scheme: dark;
+}
+
+html {
+  background: #020912;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top, rgba(56, 189, 248, 0.18), transparent 22%),
+    radial-gradient(circle at bottom right, rgba(168, 85, 247, 0.18), transparent 28%),
+    #020912;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+.slider {
+  width: 100%;
+  appearance: none;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, rgba(59, 130, 246, 0.8), rgba(168, 85, 247, 0.8));
+  outline: none;
+}
+
+.slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 9999px;
+  background: white;
+  border: 2px solid rgba(59, 130, 246, 0.8);
+  box-shadow: 0 0 12px rgba(96, 165, 250, 0.9);
+  cursor: pointer;
+}
+
+.slider::-moz-range-thumb {
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid rgba(59, 130, 246, 0.8);
+  border-radius: 9999px;
+  background: white;
+  box-shadow: 0 0 12px rgba(96, 165, 250, 0.9);
+  cursor: pointer;
+}
