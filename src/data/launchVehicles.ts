@@ -1,3 +1,5 @@
+import type { MissionRequirementResult } from './missionGoals'
+
 export interface LaunchVehicleSpec {
   id: string
   name: string
@@ -35,6 +37,7 @@ export const launchVehicles: LaunchVehicleSpec[] = [
 ]
 
 export interface LaunchRecord {
+  attemptId: number
   missionName: string
   destination: string
   spacecraftName: string
@@ -43,4 +46,16 @@ export interface LaunchRecord {
   launchVehicle: LaunchVehicleSpec
   totalMissionCostMillions: number
   missionBudgetMillions: number
+  spacecraftReliability: number
+  missionRequirementResults: MissionRequirementResult[]
+  outcome: 'success' | 'failure'
+  riskLevel: 'Low' | 'Moderate' | 'High'
+  riskScore: number
+  failureTitle: string | null
+  failureCause: string | null
+  failureParameter: string | null
+  failureActual: string | null
+  failureExpected: string | null
+  suggestedChange: string | null
+  commanderMessage: string | null
 }

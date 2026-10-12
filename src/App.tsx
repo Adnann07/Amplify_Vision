@@ -24,6 +24,7 @@ import { destinations, propulsionOptions, spacecraftCatalog } from './data/space
 import { earthObservationBriefing } from './data/missionBriefing'
 import { launchVehicles, type LaunchRecord, type LaunchVehicleSpec } from './data/launchVehicles'
 import { LaunchResults, LaunchVehicleSelection } from './components/mission/LaunchVehicleSelection'
+import { assessLaunchOutcome } from './data/launchOutcome'
 
 const SpacecraftViewer = lazy(() =>
   import('./components/3d/SpacecraftViewer').then((module) => ({ default: module.SpacecraftViewer })),
@@ -78,6 +79,7 @@ function App() {
   const [launchScreen, setLaunchScreen] = useState<'builder' | 'selection' | 'results'>('builder')
   const [selectedLaunchVehicleId, setSelectedLaunchVehicleId] = useState<string | null>(null)
   const [launchRecord, setLaunchRecord] = useState<LaunchRecord | null>(null)
+  const [launchAttempt, setLaunchAttempt] = useState(0)
   const [selectedDestinationId, setSelectedDestinationId] = useState(destinations[0].id)
   const [selectedPropulsionId, setSelectedPropulsionId] = useState(propulsionOptions[0].id)
   const [build, setBuild] = useState(createInitialBuild)
@@ -145,13 +147,9 @@ function App() {
     ...buildStats,
     missionCost: totalMissionCost,
   })
-  const baseMissionRequirements = evaluateMissionRequirements(missionWithBudgetLimit, buildStats)
   const metRequirements = missionRequirements.filter((requirement) => requirement.passed).length
   const missionReadiness = Math.round((metRequirements / missionRequirements.length) * 100)
   const missionPassed = metRequirements === missionRequirements.length
-  const spacecraftRequirementsPassed = baseMissionRequirements
-    .filter((requirement) => requirement.id !== 'maxBudget')
-    .every((requirement) => requirement.passed)
   const designSignature = JSON.stringify([
     selectedMissionId,
     selectedSpacecraft.id,
@@ -254,19 +252,13 @@ function App() {
       ...buildStats,
       missionCost: totalCost,
     })
-    const launchReady =
-      hasTestedCurrentDesign &&
-      spacecraftRequirementsPassed &&
-      buildStats.mass <= vehicle.payloadCapacityKg &&
-      totalCost <= missionBudgetLimitMillions &&
-      launchRequirements.every((requirement) => requirement.passed)
+    const assessment = assessLaunchOutcome(buildStats.mass, buildStats.reliability, vehicle)
 
-    if (!launchReady) {
-      return
-    }
-
+    const attemptId = launchAttempt + 1
+    setLaunchAttempt(attemptId)
     setSelectedLaunchVehicleId(vehicle.id)
     setLaunchRecord({
+      attemptId,
       missionName: selectedMission.name,
       destination: selectedDestination.label,
       spacecraftName: selectedSpacecraft.name,
@@ -275,6 +267,9 @@ function App() {
       launchVehicle: vehicle,
       totalMissionCostMillions: totalCost,
       missionBudgetMillions: missionBudgetLimitMillions,
+      spacecraftReliability: buildStats.reliability,
+      missionRequirementResults: launchRequirements,
+      ...assessment,
     })
     setLaunchScreen('results')
   }
@@ -753,12 +748,16 @@ function App() {
                 missionBudgetMillions={missionBudgetMillions}
                 missionBudgetLimitMillions={missionBudgetLimitMillions}
                 designTested={hasTestedCurrentDesign}
-                requirementsReady={spacecraftRequirementsPassed}
+                missionRequirements={missionRequirements}
+                spacecraftReliability={buildStats.reliability}
               />
             ) : launchScreen === 'results' && launchRecord ? (
               <LaunchResults
+                key={launchRecord.attemptId}
                 record={launchRecord}
+                onRetry={launchMission}
                 onReturnToBuilder={() => setLaunchScreen('builder')}
+                onChangeLaunchVehicle={() => setLaunchScreen('selection')}
               />
             ) : (
               <>
