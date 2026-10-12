@@ -31,16 +31,17 @@ interface ConversationMessage {
   content: string
   sources?: SourceReference[]
   groundedInEarthdata?: boolean
+  groundedInSpaceWeather?: boolean
 }
 
 const WELCOME_MESSAGE =
-  'Welcome to Mission Control! Ask me about NASA Earth-science datasets, satellite observations, and scientific data that could help inform your mission.'
+  'Welcome to Mission Control! Ask me about NASA Earth-science datasets, NOAA space-weather updates, satellite observations, and scientific data that could help inform your mission.'
 
 const SUGGESTED_QUESTIONS = [
   "Find NASA datasets about Earth's atmosphere.",
   'What NASA datasets are available for ocean temperature?',
   'Find satellite data related to rainfall.',
-  'How could Earth-observation data support a research mission?',
+  'What space-weather alerts and K-index measurements are currently available from NOAA?',
 ]
 
 let nextMessageId = 1
@@ -60,7 +61,7 @@ function isSourceReference(value: unknown): value is SourceReference {
 }
 
 function isTrustedUrl(value: URL) {
-  const trustedHost = ['nasa.gov', 'earthdata.nasa.gov', 'doi.org']
+  const trustedHost = ['nasa.gov', 'earthdata.nasa.gov', 'doi.org', 'services.swpc.noaa.gov', 'swpc.noaa.gov']
     .some((host) => value.hostname === host || value.hostname.endsWith(`.${host}`))
   return value.protocol === 'https:' && trustedHost && !value.username && !value.password
 }
@@ -154,6 +155,7 @@ export function MissionControlChat({ context }: { context: MissionControlContext
           content: answer,
           sources,
           groundedInEarthdata: 'groundedInEarthdata' in result && result.groundedInEarthdata === true,
+          groundedInSpaceWeather: 'groundedInSpaceWeather' in result && result.groundedInSpaceWeather === true,
         },
       ])
     } catch (caught) {
@@ -249,7 +251,13 @@ export function MissionControlChat({ context }: { context: MissionControlContext
                 }`}>
                   {message.role === 'assistant' && (
                     <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-sky-200/70">
-                      {message.groundedInEarthdata ? 'NASA Earthdata results + explanation' : 'Mission Control · General explanation'}
+                      {message.groundedInEarthdata && message.groundedInSpaceWeather
+                        ? 'NASA Earthdata + NOAA SWPC data'
+                        : message.groundedInEarthdata
+                          ? 'NASA Earthdata results + explanation'
+                          : message.groundedInSpaceWeather
+                            ? 'NOAA SWPC data + explanation'
+                            : 'Mission Control · General explanation'}
                     </p>
                   )}
                   <div className="mission-control-answer break-words text-[13px] leading-relaxed">

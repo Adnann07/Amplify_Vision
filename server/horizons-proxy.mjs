@@ -3,12 +3,21 @@ import { stat } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { extname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createSpaceWeatherHandler, createSpaceWeatherService } from './space-weather.mjs'
 import { createMissionControlHandler } from './mission-control.mjs'
+import { createRealTimeEventsHandler, createRealTimeEventsService } from './real-time-events.mjs'
 
 const projectRoot = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const distributionRoot = resolve(projectRoot, 'dist')
 const allowedTargets = new Set(['199', '299', '399', '499', '599', '699', '799', '899'])
-const missionControlHandler = createMissionControlHandler()
+const spaceWeatherService = createSpaceWeatherService()
+const missionControlHandler = createMissionControlHandler({
+  getSpaceWeatherSummary: (options) => spaceWeatherService.getSummary(options),
+})
+const spaceWeatherHandler = createSpaceWeatherHandler({ service: spaceWeatherService })
+const realTimeEventsHandler = createRealTimeEventsHandler({
+  service: createRealTimeEventsService({ spaceWeatherService }),
+})
 const mimeTypes = new Map([
   ['.css', 'text/css; charset=utf-8'],
   ['.glb', 'model/gltf-binary'],
@@ -30,6 +39,14 @@ const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? '/', 'http://localhost')
   if (url.pathname === '/api/mission-control/chat') {
     await missionControlHandler(request, response)
+    return
+  }
+  if (url.pathname.startsWith('/api/space-weather/')) {
+    await spaceWeatherHandler(request, response)
+    return
+  }
+  if (url.pathname.startsWith('/api/real-time-events')) {
+    await realTimeEventsHandler(request, response)
     return
   }
   if (url.pathname === '/api/horizons') {

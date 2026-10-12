@@ -18,6 +18,10 @@ interface SolarSystemPlannerProps {
   selectedDestinationId: string
   onSelectBody: (bodyId: string) => void
   onSetDestination: (destinationId: string) => void
+  planningOnly?: boolean
+  planningOnlyTitle?: string
+  planningOnlySourceUrl?: string
+  planningOnlyIsLiveEvent?: boolean
 }
 
 function formatAu(value: number) {
@@ -41,6 +45,10 @@ export function SolarSystemPlanner({
   selectedDestinationId,
   onSelectBody,
   onSetDestination,
+  planningOnly = false,
+  planningOnlyTitle,
+  planningOnlySourceUrl,
+  planningOnlyIsLiveEvent = false,
 }: SolarSystemPlannerProps) {
   const byBody = new Map(positions.map((position) => [position.bodyId, position]))
   const earth = byBody.get('earth')
@@ -51,6 +59,30 @@ export function SolarSystemPlanner({
     earth && selectedPosition && selectedBody.id !== 'earth'
       ? estimateHohmannTransfer(earth, selectedPosition)
       : null
+
+  if (planningOnly) {
+    return (
+      <section className="rounded-[28px] border border-amber-200/15 bg-slate-900/75 p-5">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-amber-200/80">
+          {planningOnlyIsLiveEvent
+            ? 'JPL close-approach context · no orbital solution'
+            : 'Mission planning context · no trajectory solution'}
+        </p>
+        <h2 className="mt-2 text-xl font-semibold text-white">Small-body planning exercise</h2>
+        {planningOnlyTitle && <p className="mt-2 text-xs text-slate-300">{planningOnlyTitle}</p>}
+        <p className="mt-3 max-w-3xl text-xs leading-relaxed text-slate-400">
+          {planningOnlyIsLiveEvent
+            ? 'The event record provides close-approach observations, not an asteroid trajectory for this spacecraft. Planetary vectors cannot substitute for that object’s orbit. This exercise calculates no asteroid orbit, transfer time, intercept, or launch window.'
+            : 'The current planner provides planetary positions, not an orbit or trajectory for this small body. This exercise calculates no asteroid orbit, transfer time, intercept, or launch window; evaluate the spacecraft design using the listed engineering constraints only.'}
+        </p>
+        {planningOnlySourceUrl && (
+          <a href={planningOnlySourceUrl} target="_blank" rel="noreferrer" className="mt-4 inline-flex text-[10px] font-medium text-sky-200 underline underline-offset-2">
+            {planningOnlyIsLiveEvent ? 'Review the saved JPL source record ↗' : 'Review the official mission reference ↗'}
+          </a>
+        )}
+      </section>
+    )
+  }
 
   return (
     <section className="rounded-[28px] border border-cyan-300/15 bg-slate-900/75 p-5 shadow-[0_15px_55px_rgba(15,23,42,0.35)]">

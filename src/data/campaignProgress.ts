@@ -1,4 +1,5 @@
-import { campaignMissions } from './campaign'
+import { campaignMissions, type CampaignMission } from './campaign'
+import { isStoredEventCampaignMission } from './realTimeEvents'
 
 export interface CampaignAttemptSummary {
   id: string
@@ -14,9 +15,12 @@ export interface CampaignProgress {
   completedMissionIds: string[]
   bestScores: Record<string, number>
   attempts: CampaignAttemptSummary[]
+  allMissionsUnlocked: boolean
+  eventMissions: CampaignMission[]
 }
 
 export const CAMPAIGN_PROGRESS_STORAGE_KEY = 'amplify-vision-campaign-progress-v1'
+const CAMPAIGN_UNLOCK_CODE = '6767'
 
 export function createEmptyCampaignProgress(): CampaignProgress {
   return {
@@ -24,7 +28,17 @@ export function createEmptyCampaignProgress(): CampaignProgress {
     completedMissionIds: [],
     bestScores: {},
     attempts: [],
+    allMissionsUnlocked: false,
+    eventMissions: [],
   }
+}
+
+export function isCampaignUnlockCode(code: string) {
+  return code === CAMPAIGN_UNLOCK_CODE
+}
+
+export function unlockAllCampaignMissions(progress: CampaignProgress): CampaignProgress {
+  return { ...progress, allMissionsUnlocked: true }
 }
 
 export function loadCampaignProgress(): { progress: CampaignProgress; warning: string | null } {
@@ -33,13 +47,19 @@ export function loadCampaignProgress(): { progress: CampaignProgress; warning: s
     if (!stored) return { progress: createEmptyCampaignProgress(), warning: null }
 
     const parsed: unknown = JSON.parse(stored)
-    if (!isCampaignProgress(parsed)) {
+    const normalized = normalizeCampaignProgress(parsed)
+    if (!normalized) {
       const warning = 'Saved campaign progress was invalid and has been reset.'
       console.warn(warning)
       return { progress: createEmptyCampaignProgress(), warning }
     }
 
-    return { progress: parsed, warning: null }
+    return {
+      progress: normalized.progress,
+      warning: normalized.discardedEventMissions
+        ? 'Some invalid saved live-event mission snapshots were removed; other campaign progress was preserved.'
+        : null,
+    }
   } catch (error) {
     const warning = 'Campaign progress could not be loaded from this browser.'
     console.warn(warning, error)
@@ -57,29 +77,54 @@ export function saveCampaignProgress(progress: CampaignProgress): string | null 
   }
 }
 
-function isCampaignProgress(value: unknown): value is CampaignProgress {
-  if (!value || typeof value !== 'object') return false
+function normalizeCampaignProgress(value: unknown): {
+  progress: CampaignProgress
+  discardedEventMissions: boolean
+} | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const progress = value as Partial<CampaignProgress>
-  const missionIds = new Set(campaignMissions.map((mission) => mission.id))
+  const staticMissionIds = new Set(campaignMissions.map((mission) => mission.id))
+  const rawEventMissions = Array.isArray(progress.eventMissions) ? progress.eventMissions : []
+  const eventMissions = rawEventMissions.filter(isStoredEventCampaignMission)
+  const validMissionIds = new Set([...staticMissionIds, ...eventMissions.map((mission) => mission.id)])
+  const discardedEventMissions =
+    progress.eventMissions !== undefined &&
+    (!Array.isArray(progress.eventMissions) || rawEventMissions.length !== eventMissions.length)
+  const normalized = {
+    ...progress,
+    eventMissions,
+    completedMissionIds: Array.isArray(progress.completedMissionIds)
+      ? progress.completedMissionIds.filter((id) => typeof id === 'string' && validMissionIds.has(id))
+      : progress.completedMissionIds,
+    bestScores: progress.bestScores && typeof progress.bestScores === 'object' && !Array.isArray(progress.bestScores)
+      ? Object.fromEntries(Object.entries(progress.bestScores).filter(([id]) => validMissionIds.has(id)))
+      : progress.bestScores,
+    attempts: Array.isArray(progress.attempts)
+      ? progress.attempts.filter((attempt) =>
+          !!attempt && typeof attempt.missionId === 'string' && validMissionIds.has(attempt.missionId),
+        )
+      : progress.attempts,
+  }
 
-  return (
-    progress.version === 1 &&
-    Array.isArray(progress.completedMissionIds) &&
-    progress.completedMissionIds.every((id) => typeof id === 'string' && missionIds.has(id)) &&
-    progress.bestScores !== null &&
-    typeof progress.bestScores === 'object' &&
-    !Array.isArray(progress.bestScores) &&
-    Object.entries(progress.bestScores).every(
+  if (!(
+    normalized.version === 1 &&
+    (normalized.allMissionsUnlocked === undefined || typeof normalized.allMissionsUnlocked === 'boolean') &&
+    Array.isArray(normalized.completedMissionIds) &&
+    normalized.completedMissionIds.every((id) => typeof id === 'string' && validMissionIds.has(id)) &&
+    normalized.bestScores !== null &&
+    typeof normalized.bestScores === 'object' &&
+    !Array.isArray(normalized.bestScores) &&
+    Object.entries(normalized.bestScores).every(
       ([id, score]) =>
-        missionIds.has(id) && typeof score === 'number' && Number.isFinite(score) && score >= 0 && score <= 100,
+        validMissionIds.has(id) && typeof score === 'number' && Number.isFinite(score) && score >= 0 && score <= 100,
     ) &&
-    Array.isArray(progress.attempts) &&
-    progress.attempts.every(
+    Array.isArray(normalized.attempts) &&
+    normalized.attempts.every(
       (attempt) =>
         !!attempt &&
         typeof attempt.id === 'string' &&
         typeof attempt.missionId === 'string' &&
-        missionIds.has(attempt.missionId) &&
+        validMissionIds.has(attempt.missionId) &&
         typeof attempt.attemptNumber === 'number' &&
         Number.isInteger(attempt.attemptNumber) &&
         attempt.attemptNumber > 0 &&
@@ -92,5 +137,12 @@ function isCampaignProgress(value: unknown): value is CampaignProgress {
           attempt.status === 'Successful') &&
         typeof attempt.objectiveAchieved === 'boolean',
     )
-  )
+  )) return null
+  return {
+    progress: {
+      ...normalized,
+      allMissionsUnlocked: normalized.allMissionsUnlocked === true,
+    } as CampaignProgress,
+    discardedEventMissions,
+  }
 }

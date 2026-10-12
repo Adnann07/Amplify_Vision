@@ -1,9 +1,18 @@
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { defineConfig, type Plugin } from 'vite'
+import { createSpaceWeatherHandler, createSpaceWeatherService } from './server/space-weather.mjs'
 import { createMissionControlHandler } from './server/mission-control.mjs'
+import { createRealTimeEventsHandler, createRealTimeEventsService } from './server/real-time-events.mjs'
 
-const missionControlHandler = createMissionControlHandler()
+const spaceWeatherService = createSpaceWeatherService()
+const missionControlHandler = createMissionControlHandler({
+  getSpaceWeatherSummary: (options?: { force?: boolean }) => spaceWeatherService.getSummary(options),
+})
+const spaceWeatherHandler = createSpaceWeatherHandler({ service: spaceWeatherService })
+const realTimeEventsHandler = createRealTimeEventsHandler({
+  service: createRealTimeEventsService({ spaceWeatherService }),
+})
 
 function missionControlApi(): Plugin {
   return {
@@ -20,8 +29,38 @@ function missionControlApi(): Plugin {
   }
 }
 
+function spaceWeatherApi(): Plugin {
+  return {
+    name: 'space-weather-api',
+    configureServer(server) {
+      server.middlewares.use((request, response, next) => {
+        if (!new URL(request.url ?? '/', 'http://vite.local').pathname.startsWith('/api/space-weather/')) {
+          next()
+          return
+        }
+        void spaceWeatherHandler(request, response)
+      })
+    },
+  }
+}
+
+function realTimeEventsApi(): Plugin {
+  return {
+    name: 'real-time-events-api',
+    configureServer(server) {
+      server.middlewares.use((request, response, next) => {
+        if (!new URL(request.url ?? '/', 'http://vite.local').pathname.startsWith('/api/real-time-events')) {
+          next()
+          return
+        }
+        void realTimeEventsHandler(request, response)
+      })
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss(), missionControlApi()],
+  plugins: [react(), tailwindcss(), missionControlApi(), spaceWeatherApi(), realTimeEventsApi()],
   server: {
     proxy: {
       '/api/horizons': {

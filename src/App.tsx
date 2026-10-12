@@ -20,14 +20,30 @@ import {
   defaultSustainabilityChoices,
   type SustainabilityChoices,
 } from './data/sustainability'
-import { destinations, propulsionOptions, spacecraftCatalog } from './data/spacecraft'
+import {
+  availableSpacecraftCatalog,
+  destinations,
+  propulsionOptions,
+} from './data/spacecraft'
 import { launchVehicles, type LaunchRecord, type LaunchVehicleSpec } from './data/launchVehicles'
 import { LaunchResults, LaunchVehicleSelection } from './components/mission/LaunchVehicleSelection'
 import { assessLaunchOutcome } from './data/launchOutcome'
 import { HomeScreen, CampaignSelectionScreen } from './components/mission/GameModeSelection'
-import { campaignMissions, getCampaignMissionGoal } from './data/campaign'
+import { LiveEventsBoard } from './components/mission/LiveEventsBoard'
+import {
+  campaignMissions,
+  getCampaignMissionGoal,
+  isCampaignMissionUnlocked,
+  resolveCampaignMission,
+} from './data/campaign'
+import type { CampaignMission } from './data/campaign'
 import { evaluateCampaignAttempt, type CampaignEvaluation } from './data/campaignScoring'
-import { loadCampaignProgress, saveCampaignProgress, type CampaignProgress } from './data/campaignProgress'
+import {
+  loadCampaignProgress,
+  saveCampaignProgress,
+  unlockAllCampaignMissions,
+  type CampaignProgress,
+} from './data/campaignProgress'
 import {
   CampaignMissionSimulation,
   CampaignPerformanceReport,
@@ -38,7 +54,7 @@ import { heliocentricBodies } from './data/planetaryData'
 import { estimateHohmannTransfer } from './data/missionPlanner'
 
 type GameMode = 'mission' | 'freeplay'
-type EntryScreen = 'home' | 'campaign' | 'briefing' | 'builder'
+type EntryScreen = 'home' | 'campaign' | 'events' | 'briefing' | 'builder'
 type BriefingOrigin = 'campaign' | 'builder'
 type LaunchScreen = 'builder' | 'selection' | 'results' | 'simulation' | 'report'
 
@@ -57,6 +73,9 @@ const MissionDirector = lazy(() =>
 )
 const MissionControlChat = lazy(() =>
   import('./components/mission/MissionControlChat').then((module) => ({ default: module.MissionControlChat })),
+)
+const SpaceWeatherControl = lazy(() =>
+  import('./components/mission/SpaceWeatherControl').then((module) => ({ default: module.SpaceWeatherControl })),
 )
 
 function clamp(value: number, min: number, max: number) {
@@ -101,7 +120,7 @@ function App() {
   const [entryScreen, setEntryScreen] = useState<EntryScreen>('home')
   const [briefingOrigin, setBriefingOrigin] = useState<BriefingOrigin>('campaign')
   const [gameMode, setGameMode] = useState<GameMode | null>(null)
-  const [selectedSpacecraft, setSelectedSpacecraft] = useState(spacecraftCatalog[0])
+  const [selectedSpacecraft, setSelectedSpacecraft] = useState(availableSpacecraftCatalog[0])
   const [selectedCampaignMissionId, setSelectedCampaignMissionId] = useState(campaignMissions[0].id)
   const [selectedMissionId, setSelectedMissionId] = useState('earth-observation')
   const [testedDesign, setTestedDesign] = useState<string | null>(null)
@@ -131,9 +150,17 @@ function App() {
   const [riskTolerance, setRiskTolerance] = useState(38)
 
   const campaignProgress = campaignState.progress
-
+  const availableCampaignMissions = useMemo(
+    () => [...campaignMissions, ...campaignProgress.eventMissions],
+    [campaignProgress.eventMissions],
+  )
+  const selectedCampaignMission =
+    availableCampaignMissions.find((mission) => mission.id === selectedCampaignMissionId) ?? campaignMissions[0]
+  const isAsteroidPlanningExercise =
+    gameMode === 'mission' &&
+    (selectedCampaignMission.eventProvenance?.provider === 'jpl' || selectedCampaignMission.planningOnly === true)
   useEffect(() => {
-    if (entryScreen !== 'builder' || launchScreen === 'results') return
+    if (entryScreen !== 'builder' || launchScreen === 'results' || isAsteroidPlanningExercise) return
     const controller = new AbortController()
     void loadSolarSystemPositions(launchDate, controller.signal)
       .then((result) => {
@@ -152,7 +179,7 @@ function App() {
         if (!controller.signal.aborted) setPlannerLoading(false)
       })
     return () => controller.abort()
-  }, [entryScreen, launchDate, launchScreen])
+  }, [entryScreen, isAsteroidPlanningExercise, launchDate, launchScreen])
 
   const selectedDestination =
     destinations.find((destination) => destination.id === selectedDestinationId) ?? destinations[0]
@@ -160,8 +187,6 @@ function App() {
     propulsionOptions.find((option) => option.id === selectedPropulsionId) ?? propulsionOptions[0]
   const selectedMission =
     missionGoals.find((mission) => mission.id === selectedMissionId) ?? missionGoals[0]
-  const selectedCampaignMission =
-    campaignMissions.find((mission) => mission.id === selectedCampaignMissionId) ?? campaignMissions[0]
   const selectedLaunchVehicle =
     launchVehicles.find((vehicle) => vehicle.id === selectedLaunchVehicleId) ?? null
   const missionBudgetMillions = budget * 1000
@@ -169,7 +194,6 @@ function App() {
     gameMode === 'freeplay'
       ? missionBudgetMillions
       : Math.min(missionBudgetMillions, selectedMission.requirements.maxBudget ?? Number.POSITIVE_INFINITY)
-  const canEditAssembly = selectedSpacecraft.model.format !== 'unavailable'
   const isEarthOrbitMission = selectedDestinationId === 'earth-orbit'
   const sustainability = useMemo(
     () => assessSustainability(sustainabilityChoices, isEarthOrbitMission),
@@ -292,8 +316,12 @@ function App() {
             : []),
         ]
       : [
-          `${selectedDestination.environment} route validated`,
-          `${selectedPropulsion.label} transfer profile selected · ${metrics.transferTime} mo simplified estimate`,
+          isAsteroidPlanningExercise
+            ? 'Small-body event is retained as context only · no orbit or intercept is modeled'
+            : `${selectedDestination.environment} route validated`,
+          isAsteroidPlanningExercise
+            ? `${selectedPropulsion.label} propulsion selected · asteroid transfer not calculated`
+            : `${selectedPropulsion.label} transfer profile selected · ${metrics.transferTime} mo simplified estimate`,
           `${buildStats.communication}% communications link margin`,
           `${payload.toLocaleString()} kg payload balance within thermal envelope`,
           ...(selectedLaunchVehicle
@@ -335,21 +363,25 @@ function App() {
     { label: 'Over budget', ok: totalMissionCost <= missionBudgetLimitMillions },
   ]
   const designNeedsReview = warnings.some((warning) => !warning.ok)
-  const startCampaignMission = (missionId: string, screen: 'briefing' | 'builder' = 'briefing') => {
-    const campaignMission = campaignMissions.find((mission) => mission.id === missionId)
-    if (!campaignMission) throw new Error(`Unknown campaign mission "${missionId}".`)
-    const missingPrerequisites = campaignMission.requiresMissionIds.filter(
-      (id) => !campaignProgress.completedMissionIds.includes(id),
+  const startCampaignMission = (
+    missionId: string,
+    screen: 'briefing' | 'builder' = 'briefing',
+    missions: CampaignMission[] = availableCampaignMissions,
+  ) => {
+    const campaignMission = resolveCampaignMission(
+      missionId,
+      campaignProgress.completedMissionIds,
+      campaignProgress.allMissionsUnlocked,
+      missions,
     )
-    if (missingPrerequisites.length > 0) {
-      throw new Error(
-        `Campaign mission "${campaignMission.id}" is locked until these missions are completed: ${missingPrerequisites.join(', ')}.`,
-      )
-    }
     const missionGoal = getCampaignMissionGoal(campaignMission)
     setGameMode('mission')
     setSelectedCampaignMissionId(campaignMission.id)
     setSelectedMissionId(campaignMission.missionGoalId)
+    const recommendedSpacecraft = availableSpacecraftCatalog.find(
+      (spacecraft) => spacecraft.id === campaignMission.recommendedSpacecraftId,
+    )
+    if (recommendedSpacecraft) setSelectedSpacecraft(recommendedSpacecraft)
     setSelectedDestinationId(missionGoal.destinationId)
     setSelectedPlannerBodyId(
       heliocentricBodies.find((body) => body.destinationId === missionGoal.destinationId)?.id ?? 'earth',
@@ -361,6 +393,28 @@ function App() {
     setCampaignEvaluation(null)
     setLaunchScreen('builder')
     setEntryScreen(screen)
+  }
+  const startEventMission = (mission: CampaignMission) => {
+    const savedMission = campaignProgress.eventMissions.find((candidate) => candidate.id === mission.id)
+    const missionSnapshot = savedMission ?? mission
+    if (!savedMission) {
+      const nextProgress = {
+        ...campaignProgress,
+        eventMissions: [...campaignProgress.eventMissions, missionSnapshot],
+      }
+      const storageWarning = saveCampaignProgress(nextProgress)
+      setCampaignState({ progress: nextProgress, storageWarning })
+    }
+    startCampaignMission(
+      missionSnapshot.id,
+      'briefing',
+      savedMission ? availableCampaignMissions : [...availableCampaignMissions, missionSnapshot],
+    )
+  }
+  const unlockCampaignMissions = () => {
+    const nextProgress = unlockAllCampaignMissions(campaignProgress)
+    const storageWarning = saveCampaignProgress(nextProgress)
+    setCampaignState({ progress: nextProgress, storageWarning })
   }
   const finishCampaignAttempt = (record: LaunchRecord) => {
     const evaluation = evaluateCampaignAttempt(selectedCampaignMission, record)
@@ -407,7 +461,9 @@ function App() {
       missionCost: totalCost,
     })
     const assessment = assessLaunchOutcome(buildStats.mass, buildStats.reliability, vehicle)
-    const ephemerides = plannerPositions.filter((position) => position.requestedDate === launchDate)
+    const ephemerides = isAsteroidPlanningExercise
+      ? []
+      : plannerPositions.filter((position) => position.requestedDate === launchDate)
     const destinationBody = heliocentricBodies.find(
       (body) => body.destinationId === selectedDestinationId,
     ) ?? null
@@ -458,26 +514,31 @@ function App() {
   }
 
   const missionControlChat = (
-    <Suspense fallback={null}>
-      <MissionControlChat
-        context={{
-          mode: gameMode === 'mission' ? 'Mission Mode' : gameMode === 'freeplay' ? 'Freeplay' : 'Mode selection',
-          mission: gameMode === 'mission' ? selectedCampaignMission.title : 'Freeplay sandbox',
-          objective: gameMode === 'mission' ? selectedCampaignMission.objective : selectedMission.description,
-          destination: selectedDestination.label,
-          phase: launchScreen === 'results' ? `Launch results · ${launchRecord?.outcome ?? 'not available'}` : launchScreen,
-          spacecraft: selectedSpacecraft.name,
-          propulsion: selectedPropulsion.label,
-          ...(selectedLaunchVehicle ? { launchVehicle: selectedLaunchVehicle.name } : {}),
-          massKg: buildStats.mass,
-          powerWatts: buildStats.power,
-          deltaVKmPerSecond: buildStats.deltaV,
-          communicationPercent: buildStats.communication,
-          reliabilityPercent: buildStats.reliability,
-          scienceInstruments: buildStats.instrumentCount,
-        }}
-      />
-    </Suspense>
+    <>
+      <Suspense fallback={null}>
+        <MissionControlChat
+          context={{
+            mode: gameMode === 'mission' ? 'Mission Mode' : gameMode === 'freeplay' ? 'Freeplay' : 'Mode selection',
+            mission: gameMode === 'mission' ? selectedCampaignMission.title : 'Freeplay sandbox',
+            objective: gameMode === 'mission' ? selectedCampaignMission.objective : selectedMission.description,
+            destination: selectedDestination.label,
+            phase: launchScreen === 'results' ? `Launch results · ${launchRecord?.outcome ?? 'not available'}` : launchScreen,
+            spacecraft: selectedSpacecraft.name,
+            propulsion: selectedPropulsion.label,
+            ...(selectedLaunchVehicle ? { launchVehicle: selectedLaunchVehicle.name } : {}),
+            massKg: buildStats.mass,
+            powerWatts: buildStats.power,
+            deltaVKmPerSecond: buildStats.deltaV,
+            communicationPercent: buildStats.communication,
+            reliabilityPercent: buildStats.reliability,
+            scienceInstruments: buildStats.instrumentCount,
+          }}
+        />
+      </Suspense>
+      <Suspense fallback={null}>
+        <SpaceWeatherControl />
+      </Suspense>
+    </>
   )
 
   if (entryScreen === 'home') {
@@ -485,6 +546,7 @@ function App() {
       <>
         <HomeScreen
           onMissionMode={() => setEntryScreen('campaign')}
+          onLiveEvents={() => setEntryScreen('events')}
           onFreeplayMode={() => {
             setGameMode('freeplay')
             setTestedDesign(null)
@@ -504,8 +566,24 @@ function App() {
         <CampaignSelectionScreen
           onBack={() => setEntryScreen('home')}
           progress={campaignProgress}
+          missions={availableCampaignMissions}
           storageWarning={campaignState.storageWarning}
+          onUnlockAllMissions={unlockCampaignMissions}
           onSelectMission={(missionId) => startCampaignMission(missionId)}
+        />
+        {missionControlChat}
+      </>
+    )
+  }
+
+  if (entryScreen === 'events') {
+    return (
+      <>
+        <LiveEventsBoard
+          onBack={() => setEntryScreen('home')}
+          onOpenCampaign={() => setEntryScreen('campaign')}
+          onCreateMission={startEventMission}
+          savedMissionIds={campaignProgress.eventMissions.map((mission) => mission.id)}
         />
         {missionControlChat}
       </>
@@ -529,7 +607,11 @@ function App() {
     const nextMission = campaignMissions.find(
       (mission) =>
         mission.requiresMissionIds.includes(selectedCampaignMission.id) &&
-        mission.requiresMissionIds.every((id) => campaignProgress.completedMissionIds.includes(id)),
+        isCampaignMissionUnlocked(
+          mission,
+          campaignProgress.completedMissionIds,
+          campaignProgress.allMissionsUnlocked,
+        ),
     ) ?? null
     return (
       <>
@@ -655,43 +737,36 @@ function App() {
                   <label className="mb-2 block text-[11px] uppercase tracking-[0.25em] text-slate-400">
                     Spacecraft
                   </label>
-                  <div className="space-y-2">
-                    {spacecraftCatalog.map((craft) => {
-                      const isSelected = craft.id === selectedSpacecraft.id
-
-                      return (
-                        <button
-                          key={craft.id}
-                          type="button"
-                          onClick={() => setSelectedSpacecraft(craft)}
-                          className={`flex w-full items-start justify-between gap-3 rounded-2xl border px-3 py-3 text-left transition ${
-                            isSelected
-                              ? 'border-sky-400/60 bg-sky-500/10 shadow-[0_0_25px_rgba(56,189,248,0.18)]'
-                              : 'border-white/8 bg-slate-950/30 hover:border-white/15'
-                          }`}
-                        >
-                          <div>
-                            <p className="text-sm font-medium text-white">{craft.name}</p>
-                            <p className="mt-1 text-[11px] text-slate-400">{craft.type}</p>
-                            <p
-                              className={`mt-2 text-[9px] uppercase tracking-[0.16em] ${
-                                craft.model.format === 'unavailable'
-                                  ? 'text-amber-200/80'
-                                  : 'text-emerald-200/80'
-                              }`}
-                            >
-                              {craft.model.format === 'unavailable'
-                                ? '3D model unavailable'
-                                : 'Verified NASA model'}
-                            </p>
-                          </div>
-                          <span
-                            className="mt-1 h-3 w-3 rounded-full"
-                            style={{ backgroundColor: craft.accent, boxShadow: `0 0 16px ${craft.accent}` }}
-                          />
-                        </button>
+                  <select
+                    aria-label="Choose spacecraft model"
+                    value={selectedSpacecraft.id}
+                    onChange={(event) => {
+                      const spacecraft = availableSpacecraftCatalog.find(
+                        (craft) => craft.id === event.target.value,
                       )
-                    })}
+                      if (spacecraft) setSelectedSpacecraft(spacecraft)
+                    }}
+                    className="w-full rounded-xl border border-white/10 bg-slate-950/40 px-3 py-3 text-sm text-slate-100 outline-none focus:border-sky-400/60"
+                  >
+                    {availableSpacecraftCatalog.map((craft) => (
+                      <option key={craft.id} value={craft.id}>
+                        {craft.name} · {craft.type}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="mt-3 rounded-xl border border-white/8 bg-slate-950/30 px-3 py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-white">{selectedSpacecraft.name}</p>
+                        <p className="mt-1 text-[11px] text-slate-400">
+                          {selectedSpacecraft.missionCategory ?? 'Mission preset'} · {selectedSpacecraft.missionStatus ?? 'Mission profile'}
+                        </p>
+                      </div>
+                      <span
+                        className="h-3 w-3 shrink-0 rounded-full"
+                        style={{ backgroundColor: selectedSpacecraft.accent, boxShadow: `0 0 16px ${selectedSpacecraft.accent}` }}
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -761,11 +836,6 @@ function App() {
               <div className="mb-4">
                 <h3 className="text-lg font-medium text-white">Build / Edit</h3>
                 <p className="mt-1 text-xs text-slate-400">Fit modules and see the assembly update live.</p>
-                {!canEditAssembly && (
-                  <p className="mt-2 text-xs text-amber-200">
-                    No verified 3D model is available for this spacecraft; assembly editing is disabled rather than showing a substitute.
-                  </p>
-                )}
               </div>
               <div className="mb-4 space-y-2">
                 <div className="flex items-center justify-between rounded-xl border border-white/8 bg-slate-950/30 px-3 py-2.5 text-sm">
@@ -791,7 +861,7 @@ function App() {
                             <button
                               type="button"
                               aria-label="Remove one science instrument"
-                              disabled={!canEditAssembly || build.instrumentCount <= 1}
+                              disabled={build.instrumentCount <= 1}
                               onClick={() =>
                                 updateBuild('instrumentCount', Math.max(1, build.instrumentCount - 1))
                               }
@@ -802,7 +872,7 @@ function App() {
                             <button
                               type="button"
                               aria-label="Add one science instrument"
-                              disabled={!canEditAssembly || build.instrumentCount >= 4}
+                              disabled={build.instrumentCount >= 4}
                               onClick={() =>
                                 updateBuild('instrumentCount', Math.min(4, build.instrumentCount + 1))
                               }
@@ -816,7 +886,6 @@ function App() {
                           type="button"
                           aria-label={`${installed ? 'Remove' : 'Add'} ${buildComponentLabels[component]}`}
                           aria-pressed={installed}
-                          disabled={!canEditAssembly}
                           onClick={() => toggleComponent(component)}
                           className={`rounded-full border px-3 py-1 text-xs transition disabled:cursor-not-allowed disabled:opacity-40 ${
                             installed
@@ -837,7 +906,6 @@ function App() {
                     Solar panel size
                     <select
                       aria-label="Solar panel size"
-                      disabled={!canEditAssembly}
                       value={build.solarPanelSize}
                       onChange={(event) => updateBuild('solarPanelSize', event.target.value as SolarPanelSize)}
                       className="mt-1 w-full rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2.5 text-sm text-white"
@@ -855,7 +923,6 @@ function App() {
                     Antenna
                     <select
                       aria-label="Antenna type"
-                      disabled={!canEditAssembly}
                       value={build.antennaType}
                       onChange={(event) => updateBuild('antennaType', event.target.value as AntennaType)}
                       className="mt-1 w-full rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2.5 text-sm text-white"
@@ -871,7 +938,6 @@ function App() {
                     Engine
                     <select
                       aria-label="Engine type"
-                      disabled={!canEditAssembly}
                       value={build.engineType}
                       onChange={(event) => updateBuild('engineType', event.target.value as EngineType)}
                       className="mt-1 w-full rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2.5 text-sm text-white"
@@ -887,7 +953,6 @@ function App() {
                     Science payload
                     <select
                       aria-label="Science instrument"
-                      disabled={!canEditAssembly}
                       value={build.instrumentType}
                       onChange={(event) => updateBuild('instrumentType', event.target.value as InstrumentType)}
                       className="mt-1 w-full rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2.5 text-sm text-white"
@@ -1071,6 +1136,12 @@ function App() {
             {launchScreen === 'selection' && (
               <SolarSystemPlanner
                 mode={gameMode ?? 'mission'}
+                planningOnly={isAsteroidPlanningExercise}
+                planningOnlyTitle={selectedCampaignMission.eventProvenance?.title ?? selectedCampaignMission.title}
+                planningOnlySourceUrl={
+                  selectedCampaignMission.eventProvenance?.sourceUrl ?? selectedCampaignMission.briefing.sourceUrl
+                }
+                planningOnlyIsLiveEvent={selectedCampaignMission.eventProvenance?.provider === 'jpl'}
                 launchDate={launchDate}
                 onLaunchDateChange={updateLaunchDate}
                 positions={plannerPositions}
@@ -1187,6 +1258,12 @@ function App() {
 
             <SolarSystemPlanner
               mode={gameMode ?? 'mission'}
+              planningOnly={isAsteroidPlanningExercise}
+              planningOnlyTitle={selectedCampaignMission.eventProvenance?.title ?? selectedCampaignMission.title}
+              planningOnlySourceUrl={
+                selectedCampaignMission.eventProvenance?.sourceUrl ?? selectedCampaignMission.briefing.sourceUrl
+              }
+              planningOnlyIsLiveEvent={selectedCampaignMission.eventProvenance?.provider === 'jpl'}
               launchDate={launchDate}
               onLaunchDateChange={updateLaunchDate}
               positions={plannerPositions}
@@ -1230,14 +1307,23 @@ function App() {
               </div>
 
               <div className="rounded-[24px] border border-white/8 bg-slate-900/75 p-4">
-                <p className="text-[10px] uppercase tracking-[0.25em] text-slate-400">Transfer time</p>
-                <div className="mt-3 flex items-end gap-2">
-                  <span className="text-3xl font-semibold text-white">{metrics.transferTime}</span>
-                  <span className="pb-1 text-xs text-slate-400">months</span>
-                </div>
-                <p className="mt-3 text-xs text-slate-400">
-                  Simplified game estimate only; not a JPL trajectory or launch window.
-                </p>
+                <p className="text-[10px] uppercase tracking-[0.25em] text-slate-400">{isAsteroidPlanningExercise ? 'Asteroid transfer time' : 'Transfer time'}</p>
+                {isAsteroidPlanningExercise ? (
+                  <div className="mt-3">
+                    <p className="text-xl font-semibold text-white">Not calculated</p>
+                    <p className="mt-3 text-xs text-slate-400">This JPL close-approach exercise has no asteroid orbit, intercept, or launch-window simulation.</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="mt-3 flex items-end gap-2">
+                      <span className="text-3xl font-semibold text-white">{metrics.transferTime}</span>
+                      <span className="pb-1 text-xs text-slate-400">months</span>
+                    </div>
+                    <p className="mt-3 text-xs text-slate-400">
+                      Simplified game estimate only; not a JPL trajectory or launch window.
+                    </p>
+                  </>
+                )}
               </div>
             </div>
 
@@ -1676,15 +1762,68 @@ function App() {
               rows={[
                 { label: 'Spacecraft', value: selectedSpacecraft.name },
                 { label: 'Mission type', value: selectedSpacecraft.type },
+                { label: 'Category', value: selectedSpacecraft.missionCategory ?? 'Mission preset' },
+                { label: 'Mission status', value: selectedSpacecraft.missionStatus ?? 'Mission profile' },
                 { label: 'Agency', value: selectedSpacecraft.agency },
+                ...(selectedSpacecraft.crewCapacity
+                  ? [{ label: 'Crew capacity', value: `${selectedSpacecraft.crewCapacity} people` }]
+                  : []),
                 { label: 'Base mass', value: `${selectedSpacecraft.mass.toLocaleString()} kg` },
+                ...(selectedSpacecraft.powerSystem
+                  ? [{ label: 'Power system', value: selectedSpacecraft.powerSystem }]
+                  : []),
+                ...(selectedSpacecraft.propulsionSystem
+                  ? [{ label: 'Propulsion', value: selectedSpacecraft.propulsionSystem }]
+                  : []),
+                ...(selectedSpacecraft.instruments?.length
+                  ? [{ label: 'Equipment', value: selectedSpacecraft.instruments.join(', ') }]
+                  : []),
+                { label: '3D asset', value: `${selectedSpacecraft.model.format.toUpperCase()} mission model` },
+                { label: 'Model file', value: selectedSpacecraft.model.modelPath },
+                ...(selectedSpacecraft.assetAttribution
+                  ? [{ label: 'Model attribution', value: selectedSpacecraft.assetAttribution }]
+                  : []),
+                ...(selectedSpacecraft.assetUsageNotes
+                  ? [{
+                      label: 'Asset notes',
+                      value: selectedSpacecraft.assetUsageNotes,
+                      valueClassName: 'text-left leading-relaxed',
+                    }]
+                  : []),
                 {
                   label: 'Mission purpose',
                   value: selectedSpacecraft.missionPurpose,
                   valueClassName: 'text-left leading-relaxed',
                 },
+                ...(selectedSpacecraft.gameplayNote
+                  ? [{
+                      label: 'Simulation scope',
+                      value: selectedSpacecraft.gameplayNote,
+                      valueClassName: 'text-left leading-relaxed',
+                    }]
+                  : []),
               ]}
             />
+            <div className="flex flex-wrap gap-2">
+              {selectedSpacecraft.missionSourceUrl && (
+                <a
+                  href={selectedSpacecraft.missionSourceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-xl border border-sky-300/15 bg-sky-300/[.04] px-4 py-3 text-xs text-sky-200 underline decoration-sky-200/30 underline-offset-4"
+                >
+                  Official mission reference
+                </a>
+              )}
+              <a
+                href={selectedSpacecraft.model.sourceUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-xl border border-sky-300/15 bg-sky-300/[.04] px-4 py-3 text-xs text-sky-200 underline decoration-sky-200/30 underline-offset-4"
+              >
+                3D asset source
+              </a>
+            </div>
             <MissionDataTable
               title={gameMode === 'freeplay' ? 'Freeplay summary' : 'Mission summary'}
               rows={[
@@ -1711,7 +1850,7 @@ function App() {
                 { label: 'Communications', value: `${buildStats.communication}%` },
                 { label: 'Reliability', value: `${buildStats.reliability}%` },
                 { label: 'Mission risk', value: `${Math.round(metrics.missionRisk)} / 100` },
-                { label: 'Transit duration', value: `${metrics.transferTime} months · ${selectedDestination.transfer}` },
+                { label: 'Transit duration', value: isAsteroidPlanningExercise ? 'Not calculated · no small-body orbit modeled' : `${metrics.transferTime} months · ${selectedDestination.transfer}` },
               ]}
             />
             <MissionDataTable

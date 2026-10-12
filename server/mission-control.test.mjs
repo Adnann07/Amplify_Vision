@@ -124,8 +124,10 @@ describe('Earthdata tool schemas and trusted references', () => {
     expect(selectEarthdataTools(tools, 'How do clouds form?')).toEqual([])
   })
 
-  it('allows only HTTPS NASA Earthdata/NASA and DOI links', () => {
+  it('allows only trusted HTTPS NASA Earthdata, NOAA SWPC, and DOI links', () => {
     expect(isTrustedSourceUrl('https://cmr.earthdata.nasa.gov/search/concepts/C123.umm_json')).toBe(true)
+    expect(isTrustedSourceUrl('https://services.swpc.noaa.gov/products/alerts.json')).toBe(true)
+    expect(isTrustedSourceUrl('https://swpc.noaa.gov/')).toBe(true)
     expect(isTrustedSourceUrl('https://doi.org/10.1234/example')).toBe(true)
     expect(isTrustedSourceUrl('http://earthdata.nasa.gov/data')).toBe(false)
     expect(isTrustedSourceUrl('https://nasa.gov.attacker.example/')).toBe(false)
@@ -248,6 +250,38 @@ describe('Groq and NASA Earthdata conversation loop', () => {
     expect(result.groundedInEarthdata).toBe(false)
     expect(client.chat.completions.create.mock.calls[0][0].tools).toBeUndefined()
     expect(client.chat.completions.create.mock.calls[0][0].messages[0].content).toMatch(/currently unreachable/)
+  })
+
+  it('grounds NOAA questions in backend-retrieved feed data and returns official NOAA sources', async () => {
+    const client = groqClient({
+      completionReplies: [completion({ role: 'assistant', content: 'The latest retrieved NOAA Kp measurement is 4.' })],
+    })
+    const getSpaceWeatherSummary = vi.fn(async () => ({
+      alerts: {
+        status: 'live',
+        lastFetchedAt: '2026-10-12T12:00:00.000Z',
+        records: [{ id: 'A20F', issueTime: '2026-10-12T11:00:00.000Z', message: 'NOAA alert fixture.' }],
+      },
+      kIndex: {
+        status: 'live',
+        lastFetchedAt: '2026-10-12T12:00:00.000Z',
+        measurements: [{ time: '2026-10-12T09:00:00.000Z', kp: 4 }],
+      },
+      forecast: { status: 'unavailable', error: 'Forecast feed unavailable.' },
+    }))
+    const result = await answerMissionControlRequest({
+      messages: [{ role: 'user', content: 'What are the current NOAA space weather alerts and K-index?' }],
+    }, {
+      apiKey: 'test-key',
+      createGroq: () => client,
+      connectToEarthdata: async () => ({ tools: [], client: { close: vi.fn() } }),
+      getSpaceWeatherSummary,
+    })
+    expect(getSpaceWeatherSummary).toHaveBeenCalledTimes(1)
+    expect(result.groundedInSpaceWeather).toBe(true)
+    expect(result.sources.map(({ url }) => url)).toContain('https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json')
+    expect(client.chat.completions.create.mock.calls[0][0].messages[0].content).toContain('"kp":4')
+    expect(client.chat.completions.create.mock.calls[0][0].messages[0].content).toContain('"status":"unavailable"')
   })
 
   it('handles missing credentials and accounts without a documented tool-capable model', async () => {

@@ -40,16 +40,45 @@ export interface SpacecraftSpec {
   name: string
   agency: string
   type: string
+  missionCategory?: string
+  missionStatus?: string
   description: string
   missionPurpose: string
   destination: string
   mass: number
   power: number
   communication: string
+  propulsionSystem?: string
+  powerSystem?: string
+  instruments?: string[]
+  crewCapacity?: number
+  missionSourceUrl?: string
+  assetAttribution?: string
+  assetUsageNotes?: string
+  gameplayNote?: string
   reliability: number
   cost: number
   accent: string
   model: SpacecraftModel
+}
+
+export function filterSpacecraft(
+  spacecraft: SpacecraftSpec[],
+  category: string,
+  search: string,
+): SpacecraftSpec[] {
+  const query = search.trim().toLocaleLowerCase()
+  return spacecraft.filter((craft) => {
+    if (category !== 'All' && (craft.missionCategory ?? 'Other') !== category) return false
+    return !query || [
+      craft.name,
+      craft.type,
+      craft.description,
+      craft.destination,
+      craft.missionPurpose,
+      craft.missionStatus ?? '',
+    ].some((value) => value.toLocaleLowerCase().includes(query))
+  })
 }
 
 export interface DestinationOption {
@@ -75,6 +104,8 @@ export const spacecraftCatalog: SpacecraftSpec[] = [
     name: 'Voyager',
     agency: 'NASA / JPL',
     type: 'Deep-space probe',
+    missionCategory: 'Deep-space exploration',
+    missionStatus: 'Extended interstellar mission',
     description:
       'Long-range science platform built for heliosphere reconnaissance and interstellar monitoring.',
     missionPurpose:
@@ -86,6 +117,7 @@ export const spacecraftCatalog: SpacecraftSpec[] = [
     reliability: 91,
     cost: 840,
     accent: '#7dd3fc',
+    missionSourceUrl: 'https://science.nasa.gov/mission/voyager/',
     model: {
       format: 'stl',
       modelPath: '/models/voyager/bus.stl',
@@ -157,6 +189,8 @@ export const spacecraftCatalog: SpacecraftSpec[] = [
     name: 'Cassini',
     agency: 'NASA / ESA / ASI',
     type: 'Saturn orbiter & Huygens probe',
+    missionCategory: 'Planetary science',
+    missionStatus: 'Mission ended in 2017',
     description:
       'Orbiter and atmospheric probe built to investigate Saturn, its rings, and its moons.',
     missionPurpose:
@@ -168,6 +202,7 @@ export const spacecraftCatalog: SpacecraftSpec[] = [
     reliability: 88,
     cost: 3200,
     accent: '#c4b5fd',
+    missionSourceUrl: 'https://science.nasa.gov/mission/cassini/',
     model: {
       format: 'stl',
       modelPath: '/models/cassini/bus_01.stl',
@@ -239,6 +274,8 @@ export const spacecraftCatalog: SpacecraftSpec[] = [
     name: 'Europa Clipper',
     agency: 'NASA / JPL',
     type: 'Europa flyby science mission',
+    missionCategory: 'Planetary science',
+    missionStatus: 'En route to Jupiter; Europa flybys planned',
     description:
       'Radiation-hardened spacecraft designed to survey Europa and characterize oceanic habitability.',
     missionPurpose:
@@ -250,6 +287,7 @@ export const spacecraftCatalog: SpacecraftSpec[] = [
     reliability: 87,
     cost: 2900,
     accent: '#67e8f9',
+    missionSourceUrl: 'https://science.nasa.gov/mission/europa-clipper/',
     model: {
       format: 'stl',
       modelPath: '/models/europa-clipper/YZ-Body-EuropaClipper-2025D.stl',
@@ -274,6 +312,8 @@ export const spacecraftCatalog: SpacecraftSpec[] = [
     name: 'ISS Modules',
     agency: 'NASA / Roscosmos / ESA / JAXA / CSA',
     type: 'Modular orbital research station',
+    missionCategory: 'Orbital infrastructure',
+    missionStatus: 'Crewed orbital laboratory',
     description:
       'A permanently crewed orbital laboratory assembled from international pressurized and truss modules.',
     missionPurpose:
@@ -285,6 +325,7 @@ export const spacecraftCatalog: SpacecraftSpec[] = [
     reliability: 94,
     cost: 1500,
     accent: '#a7f3d0',
+    missionSourceUrl: 'https://www.nasa.gov/international-space-station/',
     model: {
       format: 'glb',
       modelPath: '/models/iss/iss.glb',
@@ -296,6 +337,8 @@ export const spacecraftCatalog: SpacecraftSpec[] = [
     name: 'Lunar Pathfinder',
     agency: 'ESA / SSTL',
     type: 'Lunar communications relay',
+    missionCategory: 'Communications',
+    missionStatus: 'Planned lunar communications relay',
     description:
       'A planned lunar-orbit communications relay satellite intended to support future lunar missions.',
     missionPurpose:
@@ -307,6 +350,8 @@ export const spacecraftCatalog: SpacecraftSpec[] = [
     reliability: 90,
     cost: 1100,
     accent: '#f9a8d4',
+    missionSourceUrl:
+      'https://www.esa.int/Applications/Connectivity_and_Secure_Communications/Lunar_Pathfinder',
     model: {
       format: 'unavailable',
       sourceUrl: 'https://science.nasa.gov/3d-resources/',
@@ -314,7 +359,217 @@ export const spacecraftCatalog: SpacecraftSpec[] = [
         'No downloadable NASA/JPL 3D model for Lunar Pathfinder could be verified in the official NASA 3D Resources catalog.',
     },
   },
+  {
+    id: 'orion',
+    name: 'Orion',
+    agency: 'NASA',
+    type: 'Crewed lunar spacecraft',
+    missionCategory: 'Crewed exploration',
+    missionStatus: 'Artemis crew spacecraft',
+    description:
+      'Crew transportation spacecraft designed for Artemis missions beyond low Earth orbit.',
+    missionPurpose:
+      'Carry crew to lunar vicinity and return them safely to Earth; Orion is not a lunar lander.',
+    destination: 'Lunar vicinity / Earth return',
+    mass: 11500,
+    power: 1100,
+    communication: 'Crew-rated deep-space communications',
+    propulsionSystem: 'Crew/service-module maneuvering; simplified in this game',
+    powerSystem: 'Solar-array electrical power',
+    instruments: ['Crew life-support and environmental control', 'Navigation and communications systems'],
+    crewCapacity: 4,
+    reliability: 92,
+    cost: 4200,
+    accent: '#fbbf24',
+    missionSourceUrl: 'https://www.nasa.gov/humans-in-space/orion-spacecraft/orion-overview/',
+    gameplayNote:
+      'Mass, power, reliability, and cost are rounded gameplay values, not Orion flight specifications. Crew consumables, life-support reserves, thermal protection, and human-rating are not independently simulated.',
+    assetAttribution: 'NASA',
+    assetUsageNotes:
+      'No mission-specific Orion model was verified in the inspected NASA-3D-Resources catalog; the builder remains usable without a 3D model.',
+    model: {
+      format: 'unavailable',
+      sourceUrl: 'https://github.com/nasa/NASA-3D-Resources',
+      reason:
+        'No mission-specific Orion model was verified in the inspected NASA 3D Resources catalog.',
+    },
+  },
+  {
+    id: 'perseverance',
+    name: 'Mars 2020 Perseverance Rover',
+    agency: 'NASA / JPL',
+    type: 'Mars surface rover',
+    missionCategory: 'Surface exploration',
+    missionStatus: 'Operating on Mars',
+    description:
+      'Jezero Crater rover investigating ancient habitability and collecting rock and regolith samples.',
+    missionPurpose:
+      'Explore the Martian surface, study its geology and past water environment, and cache samples.',
+    destination: 'Mars · Jezero Crater surface',
+    mass: 1500,
+    power: 900,
+    communication: 'Mars relay and direct-to-Earth links',
+    propulsionSystem: 'Surface mobility; entry, descent, and landing are separate mission systems',
+    powerSystem: 'Radioisotope power system',
+    instruments: ['Mastcam-Z', 'SuperCam', 'PIXL', 'SHERLOC', 'RIMFAX'],
+    reliability: 91,
+    cost: 3600,
+    accent: '#fb923c',
+    missionSourceUrl: 'https://science.nasa.gov/mission/mars-2020-perseverance/',
+    gameplayNote:
+      'Mass, power, reliability, and cost are rounded gameplay values, not rover flight specifications. The game does not simulate Mars entry/descent/landing, surface driving, sample caching, or relay coverage.',
+    assetAttribution: 'NASA/JPL-Caltech, NASA 3D Resources',
+    assetUsageNotes:
+      'Mission-specific GLB downloaded from the official NASA-3D-Resources repository; its README describes assets as free and without copyright. Review NASA usage guidance at https://www.nasa.gov/nasa-brand-center/images-and-media.',
+    model: {
+      format: 'glb',
+      modelPath: '/models/perseverance/Mars2020PerseveranceRover.glb',
+      sourceUrl: 'https://science.nasa.gov/3d-resources/mars-2020-perseverance-rover/',
+    },
+  },
+  {
+    id: 'osiris-rex',
+    name: 'OSIRIS-REx',
+    agency: 'NASA / Goddard / University of Arizona',
+    type: 'Asteroid sample-return spacecraft',
+    missionCategory: 'Asteroid exploration and sample return',
+    missionStatus: 'Primary mission complete; spacecraft continued as OSIRIS-APEX',
+    description:
+      'Bennu sample-return mission that collected a sample in 2020 and delivered it to Earth in 2023.',
+    missionPurpose:
+      'Characterize Bennu, collect and contain a sample, and return it to Earth.',
+    destination: 'Asteroid Bennu · Earth sample return',
+    mass: 2200,
+    power: 1000,
+    communication: 'Deep-space high-gain communications',
+    propulsionSystem: 'Chemical propulsion and proximity navigation; simplified in this game',
+    powerSystem: 'Solar arrays',
+    instruments: ['OCAMS', 'OVIRS', 'OTES', 'REXIS', 'TAGSAM sample acquisition system'],
+    reliability: 90,
+    cost: 3500,
+    accent: '#c084fc',
+    missionSourceUrl: 'https://science.nasa.gov/mission/osiris-rex/',
+    gameplayNote:
+      'Mass, power, reliability, and cost are rounded gameplay values, not OSIRIS-REx flight specifications. Asteroid approach, contact sampling, sample containment, and Earth return are represented only as planning objectives.',
+    assetAttribution: 'NASA / NASA-3D-Resources contributors',
+    assetUsageNotes:
+      'Mission-specific GLB downloaded from the official NASA-3D-Resources repository; its README describes assets as free and without copyright. Review NASA usage guidance at https://www.nasa.gov/nasa-brand-center/images-and-media.',
+    model: {
+      format: 'glb',
+      modelPath: '/models/osiris-rex/OSIRIS-REx.glb',
+      sourceUrl:
+        'https://github.com/nasa/NASA-3D-Resources/tree/master/3D%20Models/Origins%2C%20Spectral%20Interpretation%2C%20Resource%20Identification%2C%20and%20Security%20-%20Regolith%20Explorer%20%28OSIRIS-REx%29',
+    },
+  },
+  {
+    id: 'psyche',
+    name: 'Psyche',
+    agency: 'NASA / JPL',
+    type: 'Deep-space asteroid orbiter',
+    missionCategory: 'Deep-space exploration',
+    missionStatus: 'En route to asteroid Psyche; arrival planned for 2029',
+    description:
+      'Solar-electric spacecraft on a cruise to investigate the metal-rich asteroid Psyche.',
+    missionPurpose:
+      'Study asteroid Psyche using imaging, magnetic-field measurements, and gamma-ray/neutron spectroscopy.',
+    destination: 'Asteroid Psyche',
+    mass: 2600,
+    power: 1200,
+    communication: 'Deep-space high-gain communications',
+    propulsionSystem: 'Solar-electric propulsion; simplified power and thrust trade-off in this game',
+    powerSystem: 'Solar arrays',
+    instruments: ['Multispectral imager', 'Magnetometer', 'Gamma Ray and Neutron Spectrometer'],
+    reliability: 89,
+    cost: 3800,
+    accent: '#e879f9',
+    missionSourceUrl: 'https://science.nasa.gov/mission/psyche/',
+    gameplayNote:
+      'Mass, power, reliability, and cost are rounded gameplay values, not Psyche flight specifications. Solar-electric propulsion, asteroid orbit insertion, and science operations are not separately simulated.',
+    assetAttribution: 'NASA',
+    assetUsageNotes:
+      'No mission-specific Psyche model was verified in the inspected NASA-3D-Resources catalog; the builder remains usable without a 3D model.',
+    model: {
+      format: 'unavailable',
+      sourceUrl: 'https://github.com/nasa/NASA-3D-Resources',
+      reason:
+        'No mission-specific Psyche model was verified in the inspected NASA 3D Resources catalog.',
+    },
+  },
+  {
+    id: 'lucy',
+    name: 'Lucy',
+    agency: 'NASA / Southwest Research Institute',
+    type: 'Multiple-asteroid flyby spacecraft',
+    missionCategory: 'Asteroid flyby exploration',
+    missionStatus: 'Active; en route to planned asteroid encounters',
+    description:
+      'Long-duration mission that will perform flybys of main-belt and Jupiter Trojan asteroids.',
+    missionPurpose:
+      'Study multiple small bodies during close flybys; Lucy does not routinely enter asteroid orbit.',
+    destination: 'Main-belt and Jupiter Trojan asteroids',
+    mass: 1800,
+    power: 1000,
+    communication: 'Deep-space high-gain communications',
+    propulsionSystem: 'Cruise propulsion and trajectory corrections; simplified in this game',
+    powerSystem: 'Solar arrays',
+    instruments: ['L’Ralph', 'L’LORRI', 'L’TES'],
+    reliability: 90,
+    cost: 3400,
+    accent: '#f472b6',
+    missionSourceUrl: 'https://science.nasa.gov/mission/lucy/',
+    gameplayNote:
+      'Mass, power, reliability, and cost are rounded gameplay values, not Lucy flight specifications. Multi-target trajectory design, flyby timing, and observation scheduling are not simulated.',
+    assetAttribution: 'NASA',
+    assetUsageNotes:
+      'No mission-specific Lucy model was verified in the inspected NASA-3D-Resources catalog; the builder remains usable without a 3D model.',
+    model: {
+      format: 'unavailable',
+      sourceUrl: 'https://github.com/nasa/NASA-3D-Resources',
+      reason:
+        'No mission-specific Lucy model was verified in the inspected NASA 3D Resources catalog.',
+    },
+  },
+  {
+    id: 'landsat-9',
+    name: 'Landsat 9',
+    agency: 'NASA / USGS',
+    type: 'Earth-observation satellite',
+    missionCategory: 'Earth observation',
+    missionStatus: 'Operational in Earth orbit',
+    description:
+      'Operational land-imaging mission extending the Landsat record with optical and thermal observations.',
+    missionPurpose:
+      'Collect multispectral land imagery using the Operational Land Imager 2 and Thermal Infrared Sensor 2.',
+    destination: 'Earth orbit',
+    mass: 2800,
+    power: 1300,
+    communication: 'Earth-orbit data downlink',
+    propulsionSystem: 'Earth-orbit station-keeping; simplified in this game',
+    powerSystem: 'Solar arrays',
+    instruments: ['Operational Land Imager 2 (OLI-2)', 'Thermal Infrared Sensor 2 (TIRS-2)'],
+    reliability: 93,
+    cost: 2800,
+    accent: '#4ade80',
+    missionSourceUrl: 'https://science.nasa.gov/mission/landsat-9/',
+    gameplayNote:
+      'Mass, power, reliability, and cost are rounded gameplay values, not Landsat 9 flight specifications. Observation scheduling, image resolution, data volume, and ground-station access are not simulated.',
+    assetAttribution: 'NASA / USGS',
+    assetUsageNotes:
+      'NASA publishes a Landsat 9 printable 3D model, but a compatible direct model file was not verified or integrated. The builder remains usable without it.',
+    model: {
+      format: 'unavailable',
+      sourceUrl: 'https://science.nasa.gov/3d-resources/landsat-9/',
+      reason:
+        'NASA lists a Landsat 9 printable STL model; a compatible direct file was not verified for the application’s model loader.',
+    },
+  },
 ]
+
+export const availableSpacecraftCatalog = spacecraftCatalog.filter(
+  (spacecraft): spacecraft is SpacecraftSpec & {
+    model: SpacecraftGlbModel | SpacecraftStlModel
+  } => spacecraft.model.format !== 'unavailable',
+)
 
 export const destinations: DestinationOption[] = [
   {
@@ -388,6 +643,14 @@ export const destinations: DestinationOption[] = [
     environment: 'Low-orbit imaging corridor',
     risk: 8,
     transfer: '90 minutes',
+  },
+  {
+    id: 'asteroid-planning',
+    label: 'Asteroid observation planning target',
+    distance: 'Not calculated',
+    environment: 'Notional small-body characterization exercise',
+    risk: 48,
+    transfer: 'No intercept or trajectory calculated',
   },
 ]
 
