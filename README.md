@@ -38,6 +38,14 @@ Mission briefings request optional, mission-specific reference imagery from NASA
 
 The briefing character uses NASA's downloadable Advanced Crew Escape Suit GLB from the [official NASA 3D Resources page](https://science.nasa.gov/3d-resources/advanced-crew-escape-suit/). NASA attribution and asset format are documented in [MODEL_SOURCES.md](./MODEL_SOURCES.md).
 
+## NASA Mission Control assistant
+
+The optional Mission Control chat answers general questions with Groq and discovers live NASA Earthdata tools from the official Streamable HTTP MCP endpoint (`https://cmr.earthdata.nasa.gov/mcp/v1`). Dataset questions use the tools currently advertised by NASA's server; lookup results and their validated NASA/DOI source links are returned separately from general AI explanations. Earthdata discovery is not trajectory or spacecraft-performance analysis, and the assistant cannot change or launch a game design.
+
+For local development, copy `.env.example` to `.env` and set `GROQ_API_KEY` there. `.env` is git-ignored and the unprefixed key is used only by the Node/Vite server, never by browser code. Run `npm run dev`; the chat API is served by Vite's same-origin middleware. Production uses the existing Node server (`npm run build` then `npm start`) and requires `GROQ_API_KEY` in the hosting environment's private secret settings. No hosting provider is configured in this repository, so production secrets must be added to whichever provider deploys the Node server. Static-only hosting is not sufficient for the private Groq key or this API; deploy the Node server or an equivalent server-side route.
+
+The backend queries Groq's authenticated models endpoint and prefers `openai/gpt-oss-20b` when available, falling back only to documented tool-capable models present in the account. NASA tool names and schemas are discovered at runtime. Conversations are not persisted; request size, concurrency, tool iterations, and per-client request rates are bounded.
+
 Verified spacecraft model sources, formats, and availability are documented in [MODEL_SOURCES.md](./MODEL_SOURCES.md). Assembly editing is disabled when an official model is unavailable; the viewer never substitutes another mission's model.
 
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.

@@ -55,6 +55,9 @@ const SpacecraftViewer = lazy(() =>
 const MissionDirector = lazy(() =>
   import('./components/mission/MissionDirector').then((module) => ({ default: module.MissionDirector })),
 )
+const MissionControlChat = lazy(() =>
+  import('./components/mission/MissionControlChat').then((module) => ({ default: module.MissionControlChat })),
+)
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
@@ -454,39 +457,71 @@ function App() {
     setLaunchScreen('results')
   }
 
-  if (entryScreen === 'home') {
-    return (
-      <HomeScreen
-        onMissionMode={() => setEntryScreen('campaign')}
-        onFreeplayMode={() => {
-          setGameMode('freeplay')
-          setTestedDesign(null)
-          setLaunchRecord(null)
-          setLaunchScreen('builder')
-          setEntryScreen('builder')
+  const missionControlChat = (
+    <Suspense fallback={null}>
+      <MissionControlChat
+        context={{
+          mode: gameMode === 'mission' ? 'Mission Mode' : gameMode === 'freeplay' ? 'Freeplay' : 'Mode selection',
+          mission: gameMode === 'mission' ? selectedCampaignMission.title : 'Freeplay sandbox',
+          objective: gameMode === 'mission' ? selectedCampaignMission.objective : selectedMission.description,
+          destination: selectedDestination.label,
+          phase: launchScreen === 'results' ? `Launch results · ${launchRecord?.outcome ?? 'not available'}` : launchScreen,
+          spacecraft: selectedSpacecraft.name,
+          propulsion: selectedPropulsion.label,
+          ...(selectedLaunchVehicle ? { launchVehicle: selectedLaunchVehicle.name } : {}),
+          massKg: buildStats.mass,
+          powerWatts: buildStats.power,
+          deltaVKmPerSecond: buildStats.deltaV,
+          communicationPercent: buildStats.communication,
+          reliabilityPercent: buildStats.reliability,
+          scienceInstruments: buildStats.instrumentCount,
         }}
       />
+    </Suspense>
+  )
+
+  if (entryScreen === 'home') {
+    return (
+      <>
+        <HomeScreen
+          onMissionMode={() => setEntryScreen('campaign')}
+          onFreeplayMode={() => {
+            setGameMode('freeplay')
+            setTestedDesign(null)
+            setLaunchRecord(null)
+            setLaunchScreen('builder')
+            setEntryScreen('builder')
+          }}
+        />
+        {missionControlChat}
+      </>
     )
   }
 
   if (entryScreen === 'campaign') {
     return (
-      <CampaignSelectionScreen
-        onBack={() => setEntryScreen('home')}
-        progress={campaignProgress}
-        storageWarning={campaignState.storageWarning}
-        onSelectMission={(missionId) => startCampaignMission(missionId)}
-      />
+      <>
+        <CampaignSelectionScreen
+          onBack={() => setEntryScreen('home')}
+          progress={campaignProgress}
+          storageWarning={campaignState.storageWarning}
+          onSelectMission={(missionId) => startCampaignMission(missionId)}
+        />
+        {missionControlChat}
+      </>
     )
   }
 
   if (launchScreen === 'simulation' && launchRecord && gameMode === 'mission') {
     return (
-      <CampaignMissionSimulation
-        mission={selectedCampaignMission}
-        record={launchRecord}
-        onComplete={() => finishCampaignAttempt(launchRecord)}
-      />
+      <>
+        <CampaignMissionSimulation
+          mission={selectedCampaignMission}
+          record={launchRecord}
+          onComplete={() => finishCampaignAttempt(launchRecord)}
+        />
+        {missionControlChat}
+      </>
     )
   }
 
@@ -497,41 +532,45 @@ function App() {
         mission.requiresMissionIds.every((id) => campaignProgress.completedMissionIds.includes(id)),
     ) ?? null
     return (
-      <CampaignPerformanceReport
-        mission={selectedCampaignMission}
-        record={launchRecord}
-        evaluation={campaignEvaluation}
-        previousBestScore={campaignEvaluation.previousBestScore}
-        attemptHistory={campaignProgress.attempts.filter(
-          (attempt) => attempt.missionId === selectedCampaignMission.id,
-        )}
-        nextMission={nextMission}
-        onContinue={startCampaignMission}
-        onReplay={() => {
-          setLaunchRecord(null)
-          setCampaignEvaluation(null)
-          setLaunchScreen('builder')
-          setEntryScreen('builder')
-        }}
-        onRetry={() => startCampaignMission(selectedCampaignMission.id)}
-        onReviewDesign={() => {
-          setLaunchRecord(null)
-          setCampaignEvaluation(null)
-          setLaunchScreen('builder')
-          setEntryScreen('builder')
-        }}
-        onMissionSelection={() => {
-          setLaunchRecord(null)
-          setCampaignEvaluation(null)
-          setLaunchScreen('builder')
-          setEntryScreen('campaign')
-        }}
-      />
+      <>
+        <CampaignPerformanceReport
+          mission={selectedCampaignMission}
+          record={launchRecord}
+          evaluation={campaignEvaluation}
+          previousBestScore={campaignEvaluation.previousBestScore}
+          attemptHistory={campaignProgress.attempts.filter(
+            (attempt) => attempt.missionId === selectedCampaignMission.id,
+          )}
+          nextMission={nextMission}
+          onContinue={startCampaignMission}
+          onReplay={() => {
+            setLaunchRecord(null)
+            setCampaignEvaluation(null)
+            setLaunchScreen('builder')
+            setEntryScreen('builder')
+          }}
+          onRetry={() => startCampaignMission(selectedCampaignMission.id)}
+          onReviewDesign={() => {
+            setLaunchRecord(null)
+            setCampaignEvaluation(null)
+            setLaunchScreen('builder')
+            setEntryScreen('builder')
+          }}
+          onMissionSelection={() => {
+            setLaunchRecord(null)
+            setCampaignEvaluation(null)
+            setLaunchScreen('builder')
+            setEntryScreen('campaign')
+          }}
+        />
+        {missionControlChat}
+      </>
     )
   }
 
   if (entryScreen === 'briefing') {
     return (
+    <>
       <Suspense
         fallback={
           <div className="flex min-h-screen items-center justify-center bg-[#020912] text-sm text-slate-300">
@@ -548,6 +587,8 @@ function App() {
           backLabel={briefingOrigin === 'builder' ? 'Return to design' : 'Back to mission selection'}
         />
       </Suspense>
+      {missionControlChat}
+    </>
     )
   }
 
@@ -1690,6 +1731,7 @@ function App() {
           </aside>
         </main>
       </div>
+      {missionControlChat}
     </div>
   )
 }

@@ -3,10 +3,12 @@ import { stat } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { extname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createMissionControlHandler } from './mission-control.mjs'
 
 const projectRoot = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const distributionRoot = resolve(projectRoot, 'dist')
 const allowedTargets = new Set(['199', '299', '399', '499', '599', '699', '799', '899'])
+const missionControlHandler = createMissionControlHandler()
 const mimeTypes = new Map([
   ['.css', 'text/css; charset=utf-8'],
   ['.glb', 'model/gltf-binary'],
@@ -26,6 +28,10 @@ const mimeTypes = new Map([
 
 const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? '/', 'http://localhost')
+  if (url.pathname === '/api/mission-control/chat') {
+    await missionControlHandler(request, response)
+    return
+  }
   if (url.pathname === '/api/horizons') {
     await proxyHorizons(request, response, url)
     return

@@ -347,7 +347,7 @@ function FailureExplosion({ startedAt, cause }: {
   const fireMaterial = useRef<MeshBasicMaterial>(null)
   const innerFireMaterial = useRef<MeshBasicMaterial>(null)
   const shockwaveMaterial = useRef<MeshBasicMaterial>(null)
-  const dummy = useMemo(() => new Object3D(), [])
+  const dummy = useRef(new Object3D())
   const sparkGeometry = useMemo(() => new SphereGeometry(1, 7, 6), [])
   const smokeGeometry = useMemo(() => new SphereGeometry(1, 10, 8), [])
   const smokePuffMaterial = useMemo(
@@ -390,41 +390,43 @@ function FailureExplosion({ startedAt, cause }: {
     const mesh = sparks.current
     const smoke = smokePuffs.current
     if (!mesh || !smoke || !group.current) return
+    const transform = dummy.current
     const elapsed = startedAt === null ? -1 : performance.now() / 1000 - startedAt - FAILURE_TIME
     const active = elapsed >= 0
     const blastProgress = active ? Math.min(1, elapsed / 0.58) : 0
     const smokeProgress = active ? Math.min(1, Math.max(0, elapsed - 0.12) / 2.8) : 0
+    const smokeFade = active ? Math.max(0, 1 - Math.max(0, elapsed - 1) / 8) : 0
     group.current.position.set(0, 61 + Math.max(0, elapsed) * 1.2, 0)
 
     for (let index = 0; index < sparkDirections.length; index++) {
       const particleAge = elapsed - 0.06
       if (!active || particleAge < 0 || particleAge > 2.2) {
-        dummy.scale.setScalar(0)
+        transform.scale.setScalar(0)
       } else {
         const distance = particleAge * ((cause === 'overload' ? 12 : 15) + (index % 7) * 1.7)
-        dummy.position.copy(sparkDirections[index]).multiplyScalar(distance)
-        dummy.position.y -= particleAge * particleAge * 5
-        dummy.scale.setScalar(Math.max(0.001, (1 - particleAge / 2.2) * (0.45 + (index % 4) * 0.12)))
+        transform.position.copy(sparkDirections[index]).multiplyScalar(distance)
+        transform.position.y -= particleAge * particleAge * 5
+        transform.scale.setScalar(Math.max(0.001, (1 - particleAge / 2.2) * (0.45 + (index % 4) * 0.12)))
       }
-      dummy.updateMatrix()
-      mesh.setMatrixAt(index, dummy.matrix)
+      transform.updateMatrix()
+      mesh.setMatrixAt(index, transform.matrix)
     }
     mesh.instanceMatrix.needsUpdate = true
 
     for (let index = 0; index < smokeDirections.length; index++) {
       if (!active || elapsed < 0.12) {
-        dummy.scale.setScalar(0)
+        transform.scale.setScalar(0)
       } else {
         const age = elapsed - 0.12
         const drift = smokeProgress * (6 + (index % 5) * 2.6)
-        dummy.position.copy(smokeDirections[index]).multiplyScalar(drift)
-        dummy.position.y += smokeProgress * (index % 5) * 2.5
-        const puffSize = Math.max(0.001, (5 + (index % 4) * 1.7) * smokeProgress)
-        dummy.scale.set(puffSize * 1.35, puffSize, puffSize * 1.35)
-        dummy.rotation.set(index * 0.37 + age * 0.09, index * 0.61, index * 0.23)
+        transform.position.copy(smokeDirections[index]).multiplyScalar(drift)
+        transform.position.y += smokeProgress * (index % 5) * 2.5
+        const puffSize = Math.max(0.001, (5 + (index % 4) * 1.7) * smokeProgress * smokeFade)
+        transform.scale.set(puffSize * 1.35, puffSize, puffSize * 1.35)
+        transform.rotation.set(index * 0.37 + age * 0.09, index * 0.61, index * 0.23)
       }
-      dummy.updateMatrix()
-      smoke.setMatrixAt(index, dummy.matrix)
+      transform.updateMatrix()
+      smoke.setMatrixAt(index, transform.matrix)
     }
     smoke.instanceMatrix.needsUpdate = true
 
@@ -437,7 +439,6 @@ function FailureExplosion({ startedAt, cause }: {
     if (innerFireMaterial.current) {
       innerFireMaterial.current.opacity = active ? Math.max(0, 0.98 * (1 - elapsed / 1.15)) : 0
     }
-    smokePuffMaterial.opacity = active ? 0.74 * Math.max(0, 1 - Math.max(0, elapsed - 1) / 8) : 0
     if (shockwaveMaterial.current) {
       shockwaveMaterial.current.opacity = active ? Math.max(0, 0.85 * (1 - elapsed / 1.15)) : 0
     }

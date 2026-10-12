@@ -1,9 +1,27 @@
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
+import { createMissionControlHandler } from './server/mission-control.mjs'
+
+const missionControlHandler = createMissionControlHandler()
+
+function missionControlApi(): Plugin {
+  return {
+    name: 'mission-control-api',
+    configureServer(server) {
+      server.middlewares.use((request, response, next) => {
+        if (new URL(request.url ?? '/', 'http://vite.local').pathname !== '/api/mission-control/chat') {
+          next()
+          return
+        }
+        void missionControlHandler(request, response)
+      })
+    },
+  }
+}
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), missionControlApi()],
   server: {
     proxy: {
       '/api/horizons': {
