@@ -22,6 +22,8 @@ import {
 } from './data/sustainability'
 import { destinations, propulsionOptions, spacecraftCatalog } from './data/spacecraft'
 import { earthObservationBriefing } from './data/missionBriefing'
+import { launchVehicles, type LaunchRecord, type LaunchVehicleSpec } from './data/launchVehicles'
+import { LaunchResults, LaunchVehicleSelection } from './components/mission/LaunchVehicleSelection'
 
 const SpacecraftViewer = lazy(() =>
   import('./components/3d/SpacecraftViewer').then((module) => ({ default: module.SpacecraftViewer })),
@@ -38,12 +40,44 @@ function formatCurrency(value: number) {
   return `$${value.toLocaleString()}M`
 }
 
+interface MissionDataTableProps {
+  title: string
+  rows: { label: string; value: string; valueClassName?: string }[]
+}
+
+function MissionDataTable({ title, rows }: MissionDataTableProps) {
+  return (
+    <section className="min-w-0 rounded-[24px] border border-white/8 bg-slate-900/75 p-4">
+      <h3 className="mb-3 text-base font-medium text-white">{title}</h3>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[280px] border-collapse text-left text-xs">
+          <caption className="sr-only">{title}</caption>
+          <tbody>
+            {rows.map(({ label, value, valueClassName }) => (
+              <tr key={label} className="border-b border-white/5 last:border-0">
+                <th scope="row" className="py-2.5 pr-3 text-left font-medium text-slate-400">
+                  {label}
+                </th>
+                <td className={`py-2.5 pl-3 text-slate-100 ${valueClassName ?? 'text-right'}`}>
+                  {value}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
 function App() {
   const [missionStarted, setMissionStarted] = useState(false)
   const [selectedSpacecraft, setSelectedSpacecraft] = useState(spacecraftCatalog[0])
   const [selectedMissionId, setSelectedMissionId] = useState('europa-recon')
   const [testedDesign, setTestedDesign] = useState<string | null>(null)
-  const [launchedDesign, setLaunchedDesign] = useState<string | null>(null)
+  const [launchScreen, setLaunchScreen] = useState<'builder' | 'selection' | 'results'>('builder')
+  const [selectedLaunchVehicleId, setSelectedLaunchVehicleId] = useState<string | null>(null)
+  const [launchRecord, setLaunchRecord] = useState<LaunchRecord | null>(null)
   const [selectedDestinationId, setSelectedDestinationId] = useState(destinations[0].id)
   const [selectedPropulsionId, setSelectedPropulsionId] = useState(propulsionOptions[0].id)
   const [build, setBuild] = useState(createInitialBuild)
@@ -61,6 +95,13 @@ function App() {
     propulsionOptions.find((option) => option.id === selectedPropulsionId) ?? propulsionOptions[0]
   const selectedMission =
     missionGoals.find((mission) => mission.id === selectedMissionId) ?? missionGoals[0]
+  const selectedLaunchVehicle =
+    launchVehicles.find((vehicle) => vehicle.id === selectedLaunchVehicleId) ?? null
+  const missionBudgetMillions = budget * 1000
+  const missionBudgetLimitMillions = Math.min(
+    missionBudgetMillions,
+    selectedMission.requirements.maxBudget ?? Number.POSITIVE_INFINITY,
+  )
   const canEditAssembly = selectedSpacecraft.model.format !== 'unavailable'
   const isEarthOrbitMission = selectedDestinationId === 'earth-orbit'
   const sustainability = useMemo(
@@ -91,13 +132,26 @@ function App() {
       sustainabilityChoices,
     ],
   )
-  const missionRequirements = useMemo(
-    () => evaluateMissionRequirements(selectedMission, buildStats),
-    [buildStats, selectedMission],
-  )
+  const totalMissionCost =
+    buildStats.missionCost + (selectedLaunchVehicle?.launchCostMillions ?? 0)
+  const missionWithBudgetLimit = {
+    ...selectedMission,
+    requirements: {
+      ...selectedMission.requirements,
+      maxBudget: missionBudgetLimitMillions,
+    },
+  }
+  const missionRequirements = evaluateMissionRequirements(missionWithBudgetLimit, {
+    ...buildStats,
+    missionCost: totalMissionCost,
+  })
+  const baseMissionRequirements = evaluateMissionRequirements(missionWithBudgetLimit, buildStats)
   const metRequirements = missionRequirements.filter((requirement) => requirement.passed).length
   const missionReadiness = Math.round((metRequirements / missionRequirements.length) * 100)
   const missionPassed = metRequirements === missionRequirements.length
+  const spacecraftRequirementsPassed = baseMissionRequirements
+    .filter((requirement) => requirement.id !== 'maxBudget')
+    .every((requirement) => requirement.passed)
   const designSignature = JSON.stringify([
     selectedMissionId,
     selectedSpacecraft.id,
@@ -111,7 +165,7 @@ function App() {
     buildStats.resourceEfficiency,
   ])
   const hasTestedCurrentDesign = testedDesign === designSignature
-  const launchedCurrentDesign = launchedDesign === designSignature && missionPassed
+  const canReviewLaunchVehicles = hasTestedCurrentDesign
 
   const metrics = useMemo(() => {
     const missionReadiness = clamp(
@@ -151,18 +205,22 @@ function App() {
     return {
       missionReadiness,
       powerMargin: clamp((buildStats.powerMargin / Math.max(buildStats.power, 1)) * 100, 0, 100),
-      totalCost: buildStats.missionCost,
+      totalCost: totalMissionCost,
       transferTime,
       missionRisk,
     }
-  }, [buildStats, payload, riskTolerance, selectedDestination.risk, selectedPropulsion.efficiency])
+  }, [buildStats, payload, riskTolerance, selectedDestination.risk, selectedPropulsion.efficiency, totalMissionCost])
 
   const missionChecklist = [
     `${selectedDestination.environment} route validated`,
     `${selectedPropulsion.label} transfer window optimized`,
     `${buildStats.communication}% communications link margin`,
     `${payload.toLocaleString()} kg payload balance within thermal envelope`,
+    ...(selectedLaunchVehicle
+      ? [`${selectedLaunchVehicle.name} assigned · ${formatCurrency(selectedLaunchVehicle.launchCostMillions)} launch cost`]
+      : []),
   ]
+  const remainingMissionBudget = missionBudgetLimitMillions - metrics.totalCost
   const availableComponents: BuildComponentId[] = ['solarPanel', 'antenna', 'engine', 'instrument']
   const updateBuild = <Key extends keyof typeof build>(key: Key, value: (typeof build)[Key]) =>
     setBuild((current) => ({ ...current, [key]: value }))
@@ -187,9 +245,39 @@ function App() {
       ok: buildStats.communication >= 60,
     },
     { label: 'Low Delta-V', ok: buildStats.deltaV >= 3 },
-    { label: 'Over budget', ok: buildStats.missionCost <= budget * 1000 },
+    { label: 'Over budget', ok: totalMissionCost <= missionBudgetLimitMillions },
   ]
   const designNeedsReview = warnings.some((warning) => !warning.ok)
+  const launchMission = (vehicle: LaunchVehicleSpec) => {
+    const totalCost = buildStats.missionCost + vehicle.launchCostMillions
+    const launchRequirements = evaluateMissionRequirements(missionWithBudgetLimit, {
+      ...buildStats,
+      missionCost: totalCost,
+    })
+    const launchReady =
+      hasTestedCurrentDesign &&
+      spacecraftRequirementsPassed &&
+      buildStats.mass <= vehicle.payloadCapacityKg &&
+      totalCost <= missionBudgetLimitMillions &&
+      launchRequirements.every((requirement) => requirement.passed)
+
+    if (!launchReady) {
+      return
+    }
+
+    setSelectedLaunchVehicleId(vehicle.id)
+    setLaunchRecord({
+      missionName: selectedMission.name,
+      destination: selectedDestination.label,
+      spacecraftName: selectedSpacecraft.name,
+      spacecraftMassKg: buildStats.mass,
+      existingMissionCostMillions: buildStats.missionCost,
+      launchVehicle: vehicle,
+      totalMissionCostMillions: totalCost,
+      missionBudgetMillions: missionBudgetLimitMillions,
+    })
+    setLaunchScreen('results')
+  }
 
   if (!missionStarted) {
     return (
@@ -649,75 +737,31 @@ function App() {
               </div>
             </div>
 
-            <div className="rounded-[28px] border border-white/8 bg-slate-900/70 p-5 shadow-[0_15px_55px_rgba(15,23,42,0.45)] backdrop-blur-xl">
-              <h3 className="mb-4 text-lg font-medium text-white">Trajectory tuning</h3>
-              <div className="space-y-5">
-                <label className="block">
-                  <div className="mb-2 flex items-center justify-between text-sm text-slate-200">
-                    <span>Payload mass</span>
-                    <span className="text-sky-200">{payload.toLocaleString()} kg</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="50"
-                    max="1500"
-                    step="50"
-                    value={payload}
-                    onChange={(event) => setPayload(Number(event.target.value))}
-                    className="slider"
-                  />
-                </label>
-
-                <label className="block">
-                  <div className="mb-2 flex items-center justify-between text-sm text-slate-200">
-                    <span>Propellant</span>
-                    <span className="text-orange-200">{fuel.toLocaleString()} kg</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="5000"
-                    step="50"
-                    value={fuel}
-                    onChange={(event) => setFuel(Number(event.target.value))}
-                    className="slider"
-                  />
-                </label>
-
-                <label className="block">
-                  <div className="mb-2 flex items-center justify-between text-sm text-slate-200">
-                    <span>Mission budget</span>
-                    <span className="text-emerald-200">{budget} B</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="1"
-                    max="12"
-                    value={budget}
-                    onChange={(event) => setBudget(Number(event.target.value))}
-                    className="slider"
-                  />
-                </label>
-
-                <label className="block">
-                  <div className="mb-2 flex items-center justify-between text-sm text-slate-200">
-                    <span>Risk tolerance</span>
-                    <span className="text-orange-200">{riskTolerance}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="10"
-                    max="90"
-                    value={riskTolerance}
-                    onChange={(event) => setRiskTolerance(Number(event.target.value))}
-                    className="slider"
-                  />
-                </label>
-              </div>
-            </div>
           </aside>
 
           <section className="space-y-6">
+            {launchScreen === 'selection' ? (
+              <LaunchVehicleSelection
+                vehicles={launchVehicles}
+                selectedVehicleId={selectedLaunchVehicleId}
+                onSelectVehicle={setSelectedLaunchVehicleId}
+                onReturnToBuilder={() => setLaunchScreen('builder')}
+                onLaunch={launchMission}
+                spacecraftName={selectedSpacecraft.name}
+                spacecraftMassKg={buildStats.mass}
+                existingMissionCostMillions={buildStats.missionCost}
+                missionBudgetMillions={missionBudgetMillions}
+                missionBudgetLimitMillions={missionBudgetLimitMillions}
+                designTested={hasTestedCurrentDesign}
+                requirementsReady={spacecraftRequirementsPassed}
+              />
+            ) : launchScreen === 'results' && launchRecord ? (
+              <LaunchResults
+                record={launchRecord}
+                onReturnToBuilder={() => setLaunchScreen('builder')}
+              />
+            ) : (
+              <>
             <motion.div
               initial={{ opacity: 0, y: 18 }}
               animate={{ opacity: 1, y: 0 }}
@@ -820,6 +864,251 @@ function App() {
                 <p className="mt-3 text-xs text-slate-400">Window calculated from {selectedDestination.label} entry geometry.</p>
               </div>
             </div>
+
+            <div className="grid items-start gap-4 lg:grid-cols-2">
+              <section className="min-w-0 rounded-[24px] border border-white/8 bg-slate-900/75 p-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400">
+                      Live validation
+                    </p>
+                    <h3 className="mt-1 text-base font-medium text-white">Mission requirements</h3>
+                  </div>
+                  <span className="shrink-0 rounded-full border border-sky-300/20 bg-sky-300/10 px-2 py-1 text-[10px] font-medium text-sky-100">
+                    {metRequirements}/{missionRequirements.length} passed
+                  </span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[390px] border-collapse text-left text-xs">
+                    <caption className="sr-only">
+                      Current spacecraft measurements compared with mission requirements
+                    </caption>
+                    <thead>
+                      <tr className="border-b border-white/10 text-[9px] uppercase tracking-[0.14em] text-slate-500">
+                        <th scope="col" className="py-2 pr-2 font-medium">System</th>
+                        <th scope="col" className="py-2 px-2 text-right font-medium">Current</th>
+                        <th scope="col" className="py-2 px-2 text-right font-medium">Required</th>
+                        <th scope="col" className="py-2 pl-2 text-right font-medium">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {missionRequirements.map((requirement) => (
+                        <tr key={requirement.id} className="border-b border-white/5 last:border-0">
+                          <th scope="row" className="py-2.5 pr-2 font-medium text-slate-200">
+                            {requirement.label}
+                          </th>
+                          <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums text-slate-300">
+                            {requirement.displayActual}
+                          </td>
+                          <td className="whitespace-nowrap px-2 py-2.5 text-right tabular-nums text-slate-400">
+                            {requirement.displayTarget}
+                          </td>
+                          <td
+                            className={`whitespace-nowrap py-2.5 pl-2 text-right font-medium ${
+                              requirement.passed ? 'text-emerald-200' : 'text-rose-200'
+                            }`}
+                          >
+                            {requirement.passed ? 'PASS' : 'REVIEW'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section className="min-w-0 rounded-[24px] border border-white/8 bg-slate-900/75 p-4">
+                <div className="mb-3">
+                  <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400">
+                    Cost control · USD millions
+                  </p>
+                  <h3 className="mt-1 text-base font-medium text-white">Mission budget ledger</h3>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[320px] border-collapse text-left text-xs">
+                    <caption className="sr-only">
+                      Existing mission costs, launch cost, total, and remaining mission budget
+                    </caption>
+                    <thead>
+                      <tr className="border-b border-white/10 text-[9px] uppercase tracking-[0.14em] text-slate-500">
+                        <th scope="col" className="py-2 pr-3 font-medium">Cost item</th>
+                        <th scope="col" className="py-2 pl-3 text-right font-medium">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[
+                        ['Spacecraft & mission', formatCurrency(buildStats.missionCost)],
+                        [
+                          `Launch · ${selectedLaunchVehicle?.name ?? 'not selected'}`,
+                          selectedLaunchVehicle
+                            ? formatCurrency(selectedLaunchVehicle.launchCostMillions)
+                            : '—',
+                        ],
+                        ['Total mission cost', formatCurrency(metrics.totalCost)],
+                        ['Mission budget limit', formatCurrency(missionBudgetLimitMillions)],
+                        ['Budget remaining', formatCurrency(remainingMissionBudget)],
+                      ].map(([label, amount], index) => (
+                        <tr
+                          key={label}
+                          className={`border-b border-white/5 last:border-0 ${
+                            index === 2 ? 'font-semibold text-white' : ''
+                          }`}
+                        >
+                          <th scope="row" className="py-2.5 pr-3 text-left font-medium text-slate-200">
+                            {label}
+                          </th>
+                          <td
+                            className={`whitespace-nowrap py-2.5 pl-3 text-right tabular-nums ${
+                              index === 4 && remainingMissionBudget < 0
+                                ? 'font-semibold text-rose-200'
+                                : 'text-slate-300'
+                            }`}
+                          >
+                            {amount}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {remainingMissionBudget < 0 && (
+                  <p className="mt-3 text-xs font-medium text-rose-200" role="status">
+                    Mission budget exceeded by {formatCurrency(Math.abs(remainingMissionBudget))}.
+                  </p>
+                )}
+              </section>
+            </div>
+
+            <div className="grid items-start gap-4 lg:grid-cols-2">
+              <section className="min-w-0 rounded-[24px] border border-white/8 bg-slate-900/75 p-4 lg:col-span-2">
+                <h3 className="mb-3 text-base font-medium text-white">Flight review checklist</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[420px] border-collapse text-left text-xs">
+                    <caption className="sr-only">Current flight review checklist</caption>
+                    <thead>
+                      <tr className="border-b border-white/10 text-[9px] uppercase tracking-[0.14em] text-slate-500">
+                        <th scope="col" className="py-2 pr-3 font-medium">Check</th>
+                        <th scope="col" className="py-2 px-3 font-medium">Flight review item</th>
+                        <th scope="col" className="py-2 pl-3 text-right font-medium">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {missionChecklist.map((item, index) => (
+                        <tr key={item} className="border-b border-white/5 last:border-0">
+                          <th scope="row" className="py-2.5 pr-3 font-medium text-slate-400">
+                            {String(index + 1).padStart(2, '0')}
+                          </th>
+                          <td className="px-3 py-2.5 text-slate-200">{item}</td>
+                          <td className="whitespace-nowrap py-2.5 pl-3 text-right font-medium text-emerald-200">
+                            READY
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+              <MissionDataTable
+                title="Spacecraft build configuration"
+                rows={[
+                  {
+                    label: 'Solar panel',
+                    value: build.components.includes('solarPanel')
+                      ? `${solarPanelOptions[build.solarPanelSize].label} · ${solarPanelOptions[build.solarPanelSize].power.toLocaleString()} W`
+                      : 'Not installed',
+                  },
+                  {
+                    label: 'Antenna',
+                    value: build.components.includes('antenna')
+                      ? antennaOptions[build.antennaType].label
+                      : 'Not installed',
+                  },
+                  {
+                    label: 'Engine',
+                    value: build.components.includes('engine')
+                      ? engineOptions[build.engineType].label
+                      : 'Not installed',
+                  },
+                  {
+                    label: 'Science instrument',
+                    value: build.components.includes('instrument')
+                      ? `${instrumentOptions[build.instrumentType].label} ×${build.instrumentCount}`
+                      : 'Not installed',
+                  },
+                  { label: 'Science payload', value: `${payload.toLocaleString()} kg` },
+                  { label: 'Propellant', value: `${fuel.toLocaleString()} kg` },
+                  { label: 'Risk tolerance', value: `${riskTolerance}%` },
+                ]}
+              />
+              <div className="rounded-[28px] border border-white/8 bg-slate-900/70 p-5 shadow-[0_15px_55px_rgba(15,23,42,0.45)] backdrop-blur-xl">
+                <h3 className="mb-4 text-lg font-medium text-white">Trajectory tuning</h3>
+                <div className="space-y-5">
+                  <label className="block">
+                    <div className="mb-2 flex items-center justify-between text-sm text-slate-200">
+                      <span>Payload mass</span>
+                      <span className="text-sky-200">{payload.toLocaleString()} kg</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="50"
+                      max="1500"
+                      step="50"
+                      value={payload}
+                      onChange={(event) => setPayload(Number(event.target.value))}
+                      className="slider"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <div className="mb-2 flex items-center justify-between text-sm text-slate-200">
+                      <span>Propellant</span>
+                      <span className="text-orange-200">{fuel.toLocaleString()} kg</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="5000"
+                      step="50"
+                      value={fuel}
+                      onChange={(event) => setFuel(Number(event.target.value))}
+                      className="slider"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <div className="mb-2 flex items-center justify-between text-sm text-slate-200">
+                      <span>Mission budget</span>
+                      <span className="text-emerald-200">{budget} B</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="1"
+                      max="12"
+                      value={budget}
+                      onChange={(event) => setBudget(Number(event.target.value))}
+                      className="slider"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <div className="mb-2 flex items-center justify-between text-sm text-slate-200">
+                      <span>Risk tolerance</span>
+                      <span className="text-orange-200">{riskTolerance}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="10"
+                      max="90"
+                      value={riskTolerance}
+                      onChange={(event) => setRiskTolerance(Number(event.target.value))}
+                      className="slider"
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+              </>
+            )}
           </section>
 
           <aside className="space-y-6">
@@ -926,22 +1215,15 @@ function App() {
                         Mission ready
                       </h4>
                       <p className="mt-1 text-xs text-slate-200">
-                        Your spacecraft meets all mission requirements.
+                        Your spacecraft meets all mission requirements. Continue to choose a launch vehicle.
                       </p>
-                      {!launchedCurrentDesign && (
-                        <button
-                          type="button"
-                          onClick={() => setLaunchedDesign(designSignature)}
-                          className="mt-3 w-full rounded-lg bg-emerald-300 px-4 py-2.5 text-xs font-bold uppercase tracking-[0.16em] text-slate-950 transition hover:bg-emerald-200"
-                        >
-                          Launch
-                        </button>
-                      )}
-                      {launchedCurrentDesign && (
-                        <p className="mt-3 text-xs font-medium text-emerald-100">
-                          Launch sequence initiated for {selectedMission.name}.
-                        </p>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => setLaunchScreen('selection')}
+                        className="mt-3 w-full rounded-lg bg-emerald-300 px-4 py-2.5 text-xs font-bold uppercase tracking-[0.16em] text-slate-950 transition hover:bg-emerald-200"
+                      >
+                        {selectedLaunchVehicle ? 'Review Launch Vehicle' : 'Check Launch Vehicles'}
+                      </button>
                     </>
                   ) : (
                     <>
@@ -959,153 +1241,76 @@ function App() {
                       <p className="mt-2 text-[10px] text-slate-400">
                         Modify your spacecraft and try again.
                       </p>
+                      {canReviewLaunchVehicles && (
+                        <button
+                          type="button"
+                          onClick={() => setLaunchScreen('selection')}
+                          className="mt-3 w-full rounded-lg border border-sky-300/25 bg-sky-300/10 px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.12em] text-sky-100 transition hover:bg-sky-300/20"
+                        >
+                          {selectedLaunchVehicle ? 'Review Launch Vehicle' : 'Select Launch Vehicle'}
+                        </button>
+                      )}
                     </>
                   )}
                 </div>
               )}
             </section>
 
-            <div className="rounded-[28px] border border-white/8 bg-slate-900/70 p-5 shadow-[0_15px_55px_rgba(15,23,42,0.45)] backdrop-blur-xl">
-              <div className="mb-4 flex items-center justify-between">
-                <h3 className="text-lg font-medium text-white">Spacecraft profile</h3>
-                <span className="rounded-full border border-sky-400/25 bg-sky-500/10 px-2 py-1 text-[10px] uppercase tracking-[0.2em] text-sky-100">
-                  {selectedSpacecraft.id}
-                </span>
-              </div>
-              <dl className="space-y-3 text-sm">
-                <div className="flex items-start justify-between gap-4">
-                  <dt className="text-slate-400">Name</dt>
-                  <dd className="text-right text-white">{selectedSpacecraft.name}</dd>
-                </div>
-                <div className="flex items-start justify-between gap-4">
-                  <dt className="text-slate-400">Mission type</dt>
-                  <dd className="max-w-[60%] text-right text-white">{selectedSpacecraft.type}</dd>
-                </div>
-                <div className="flex items-start justify-between gap-4">
-                  <dt className="text-slate-400">Agency</dt>
-                  <dd className="max-w-[60%] text-right text-white">{selectedSpacecraft.agency}</dd>
-                </div>
-                <div className="flex items-start justify-between gap-4">
-                  <dt className="text-slate-400">Mission destination</dt>
-                  <dd className="max-w-[60%] text-right text-white">{selectedSpacecraft.destination}</dd>
-                </div>
-                <div className="flex items-start justify-between gap-4">
-                  <dt className="text-slate-400">Spacecraft mass</dt>
-                  <dd className="text-right text-white">
-                    {selectedSpacecraft.mass.toLocaleString()} kg
-                  </dd>
-                </div>
-                <div className="border-t border-white/8 pt-3">
-                  <dt className="mb-1 text-slate-400">Mission purpose</dt>
-                  <dd className="leading-relaxed text-slate-200">{selectedSpacecraft.missionPurpose}</dd>
-                </div>
-              </dl>
-            </div>
-
-            <div className="rounded-[28px] border border-white/8 bg-slate-900/70 p-5 shadow-[0_15px_55px_rgba(15,23,42,0.45)] backdrop-blur-xl">
-              <div className="mb-4 flex items-center justify-between">
-                <h3 className="text-lg font-medium text-white">Mission summary</h3>
-                <span className="rounded-full border border-emerald-400/25 bg-emerald-500/10 px-2 py-1 text-[10px] uppercase tracking-[0.2em] text-emerald-100">
-                  Live
-                </span>
-              </div>
-
-              <div className="space-y-4 text-sm">
-                <div className="rounded-2xl border border-white/8 bg-slate-950/30 p-3">
-                  <div className="flex items-center justify-between text-slate-400">
-                    <span>Spacecraft</span>
-                    <span className="text-white">{selectedSpacecraft.name}</span>
-                  </div>
-                </div>
-                <div className="rounded-2xl border border-white/8 bg-slate-950/30 p-3">
-                  <div className="flex items-center justify-between text-slate-400">
-                    <span>Destination</span>
-                    <span className="text-white">{selectedDestination.label}</span>
-                  </div>
-                </div>
-                <div className="rounded-2xl border border-white/8 bg-slate-950/30 p-3">
-                  <div className="flex items-center justify-between text-slate-400">
-                    <span>Distance</span>
-                    <span className="text-white">{selectedDestination.distance}</span>
-                  </div>
-                </div>
-                <div className="rounded-2xl border border-white/8 bg-slate-950/30 p-3">
-                  <div className="flex items-center justify-between text-slate-400">
-                    <span>Propulsion</span>
-                    <span className="text-white">{selectedPropulsion.label}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-[28px] border border-white/8 bg-slate-900/70 p-5 shadow-[0_15px_55px_rgba(15,23,42,0.45)] backdrop-blur-xl">
-              <h3 className="mb-4 text-lg font-medium text-white">Mission metrics</h3>
-              <div className="space-y-4">
-                <div className="flex items-center justify-between rounded-2xl border border-white/8 bg-slate-950/30 p-3">
-                  <span className="text-slate-400">Mission cost</span>
-                  <span className="font-medium text-white">{formatCurrency(metrics.totalCost)}</span>
-                </div>
-                <div className="flex items-center justify-between rounded-2xl border border-white/8 bg-slate-950/30 p-3">
-                  <span className="text-slate-400">Payload fraction</span>
-                  <span className="font-medium text-white">
-                    {Math.round((payload / buildStats.mass) * 100)}%
-                  </span>
-                </div>
-                <div className="flex items-center justify-between rounded-2xl border border-white/8 bg-slate-950/30 p-3">
-                  <span className="text-slate-400">Risk index</span>
-                  <span className="font-medium text-white">{Math.round(metrics.missionRisk)} / 100</span>
-                </div>
-                <div className="flex items-center justify-between rounded-2xl border border-white/8 bg-slate-950/30 p-3">
-                  <span className="text-slate-400">Transit window</span>
-                  <span className="font-medium text-white">{selectedDestination.transfer}</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-[28px] border border-emerald-300/15 bg-slate-900/70 p-5 shadow-[0_15px_55px_rgba(15,23,42,0.45)] backdrop-blur-xl">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <h3 className="text-lg font-medium text-white">Sustainability</h3>
-                <span
-                  className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] ${
-                    sustainability.level === 'High'
-                      ? 'border-emerald-300/30 bg-emerald-300/10 text-emerald-100'
-                      : sustainability.level === 'Medium'
-                        ? 'border-amber-300/30 bg-amber-300/10 text-amber-100'
-                        : 'border-rose-300/30 bg-rose-300/10 text-rose-100'
-                  }`}
-                >
-                  {sustainability.level}
-                </span>
-              </div>
-              <dl className="space-y-3">
-                {[
-                  ['Reusability', sustainability.reusability],
-                  ['Repairability', sustainability.repairability],
-                  ['Resource efficiency', sustainability.resourceEfficiency],
-                  ['End-of-life planning', sustainability.endOfLifePlanning],
-                ].map(([label, value]) => (
-                  <div key={label} className="flex items-center justify-between gap-3 text-xs">
-                    <dt className="text-slate-400">{label}</dt>
-                    <dd className="font-medium text-slate-100">{value}%</dd>
-                  </div>
-                ))}
-              </dl>
-              <p className="mt-4 border-t border-white/8 pt-3 text-xs leading-relaxed text-slate-300">
-                {sustainability.explanation}
-              </p>
-            </div>
-
-            <div className="rounded-[28px] border border-white/8 bg-slate-900/70 p-5 shadow-[0_15px_55px_rgba(15,23,42,0.45)] backdrop-blur-xl">
-              <h3 className="mb-4 text-lg font-medium text-white">Flight review</h3>
-              <ul className="space-y-3 text-sm text-slate-300">
-                {missionChecklist.map((item) => (
-                  <li key={item} className="flex items-start gap-3 rounded-2xl border border-white/8 bg-slate-950/30 p-3">
-                    <span className="mt-1 h-2 w-2 rounded-full bg-emerald-400" />
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <MissionDataTable
+              title="Spacecraft profile"
+              rows={[
+                { label: 'Spacecraft', value: selectedSpacecraft.name },
+                { label: 'Mission type', value: selectedSpacecraft.type },
+                { label: 'Agency', value: selectedSpacecraft.agency },
+                { label: 'Base mass', value: `${selectedSpacecraft.mass.toLocaleString()} kg` },
+                {
+                  label: 'Mission purpose',
+                  value: selectedSpacecraft.missionPurpose,
+                  valueClassName: 'text-left leading-relaxed',
+                },
+              ]}
+            />
+            <MissionDataTable
+              title="Mission summary"
+              rows={[
+                { label: 'Objective', value: selectedMission.name },
+                { label: 'Destination', value: selectedDestination.label },
+                { label: 'Distance', value: selectedDestination.distance },
+                { label: 'Environment', value: selectedDestination.environment },
+                { label: 'Propulsion', value: selectedPropulsion.label },
+                { label: 'Launch vehicle', value: selectedLaunchVehicle?.name ?? 'Not selected' },
+              ]}
+            />
+            <MissionDataTable
+              title="Mission performance"
+              rows={[
+                {
+                  label: 'Readiness',
+                  value: `${missionReadiness}% · ${metRequirements}/${missionRequirements.length} requirements`,
+                },
+                { label: 'Launch mass', value: `${buildStats.mass.toLocaleString()} kg` },
+                { label: 'Power / load', value: `${buildStats.power.toLocaleString()} / ${buildStats.powerDemand.toLocaleString()} W` },
+                { label: 'Delta-V', value: `${buildStats.deltaV.toFixed(1)} km/s` },
+                { label: 'Communications', value: `${buildStats.communication}%` },
+                { label: 'Reliability', value: `${buildStats.reliability}%` },
+                { label: 'Mission risk', value: `${Math.round(metrics.missionRisk)} / 100` },
+                { label: 'Transit window', value: `${metrics.transferTime} months · ${selectedDestination.transfer}` },
+              ]}
+            />
+            <MissionDataTable
+              title={`Sustainability · ${sustainability.level}`}
+              rows={[
+                { label: 'Reusability', value: `${sustainability.reusability}%` },
+                { label: 'Repairability', value: `${sustainability.repairability}%` },
+                { label: 'Resource efficiency', value: `${sustainability.resourceEfficiency}%` },
+                { label: 'End-of-life planning', value: `${sustainability.endOfLifePlanning}%` },
+                {
+                  label: 'Assessment',
+                  value: sustainability.explanation,
+                  valueClassName: 'text-left leading-relaxed',
+                },
+              ]}
+            />
           </aside>
         </main>
       </div>

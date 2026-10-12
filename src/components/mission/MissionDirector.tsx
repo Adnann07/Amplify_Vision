@@ -1,6 +1,6 @@
 import { Bounds, Float, Stars, useGLTF, useProgress } from '@react-three/drei'
 import { Canvas } from '@react-three/fiber'
-import { Component, Suspense, useState, type ErrorInfo, type ReactNode } from 'react'
+import { Component, Suspense, useState, type ReactNode } from 'react'
 import type { MissionBriefing } from '../../data/missionBriefing'
 
 interface MissionDirectorProps {
@@ -31,6 +31,44 @@ function AstronautAvatar({ path }: AvatarProps) {
   )
 }
 
+function AvatarFallback({ sourceUrl, message }: { sourceUrl: string; message: string }) {
+  return (
+    <div
+      className="flex h-full min-h-72 flex-col items-center justify-center gap-4 px-6 text-center"
+      role="status"
+    >
+      <svg
+        aria-hidden="true"
+        className="h-40 w-40 drop-shadow-[0_0_32px_rgba(56,189,248,0.2)]"
+        viewBox="0 0 160 180"
+        fill="none"
+      >
+        <path d="M80 15c-35 0-58 25-58 64v70h116V79c0-39-23-64-58-64Z" fill="#cbd5e1" />
+        <path d="M80 15c35 0 58 25 58 64v70H80V15Z" fill="#94a3b8" />
+        <path d="M37 73c0-26 18-42 43-42s43 16 43 42v14H37V73Z" fill="#082f49" stroke="#38bdf8" strokeWidth="5" />
+        <path d="M42 75c0-21 15-34 38-34v44H42v-10Z" fill="#0e7490" fillOpacity=".7" />
+        <path d="M80 100h39v10H80z" fill="#64748b" />
+        <path d="m61 149 8-26h22l8 26H61Z" fill="#e2e8f0" />
+        <path d="M80 123h11l8 26H80v-26Z" fill="#94a3b8" />
+        <path d="m37 103-17 18 13 8 16-17m74-9 17 18-13 8-16-17" stroke="#e2e8f0" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M68 125h24" stroke="#38bdf8" strokeWidth="4" strokeLinecap="round" />
+        <circle cx="80" cy="105" r="5" fill="#38bdf8" />
+      </svg>
+      <div>
+        <p className="text-sm font-medium text-white">{message}</p>
+        <a
+          className="mt-2 inline-block text-xs text-sky-200 underline underline-offset-4"
+          href={sourceUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
+          View the official NASA model
+        </a>
+      </div>
+    </div>
+  )
+}
+
 interface AvatarErrorBoundaryProps {
   children: ReactNode
   sourceUrl: string
@@ -52,8 +90,8 @@ class AvatarErrorBoundary extends Component<
     return { failed: true }
   }
 
-  componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('Unable to render the NASA mission director model.', error, info.componentStack)
+  componentDidCatch(error: Error) {
+    console.warn('NASA mission director model unavailable; using the static portrait.', error.message)
     this.props.onFailure?.()
   }
 
@@ -62,21 +100,10 @@ class AvatarErrorBoundary extends Component<
       if (this.props.inCanvas) return null
 
       return (
-        <div
-          className="flex h-full min-h-72 flex-col items-center justify-center gap-3 px-6 text-center"
-          role="status"
-        >
-          <span className="text-4xl" aria-hidden="true">◌</span>
-          <p className="text-sm font-medium text-white">Mission director model unavailable</p>
-          <a
-            className="text-xs text-sky-200 underline underline-offset-4"
-            href={this.props.sourceUrl}
-            target="_blank"
-            rel="noreferrer"
-          >
-            View the official NASA model
-          </a>
-        </div>
+        <AvatarFallback
+          sourceUrl={this.props.sourceUrl}
+          message="3D model unavailable. Showing the mission director portrait."
+        />
       )
     }
 
@@ -130,33 +157,33 @@ export function MissionDirector({ briefing, onStart }: MissionDirectorProps) {
         <div className="grid md:grid-cols-[minmax(230px,0.8fr)_1.2fr]">
           <div className="relative min-h-[320px] overflow-hidden border-b border-white/8 bg-[#06111e] md:min-h-[540px] md:border-b-0 md:border-r">
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_55%,rgba(56,189,248,0.17),transparent_58%)]" />
-            <AvatarErrorBoundary key={briefing.avatarPath} sourceUrl={briefing.sourceUrl}>
-              <Canvas
-                camera={{ position: [0, 0, 4], fov: 30 }}
-                dpr={[1, 1.5]}
-                gl={{ antialias: true, alpha: true }}
-                fallback={
-                  <div className="flex h-full min-h-72 items-center justify-center px-6 text-center text-sm text-slate-300">
-                    3D astronaut viewer is not supported in this browser.
-                  </div>
-                }
+            {!avatarFailed ? (
+              <AvatarErrorBoundary
+                key={briefing.avatarPath}
+                sourceUrl={briefing.sourceUrl}
+                onFailure={() => setAvatarFailed(true)}
               >
-                <ambientLight intensity={2} />
-                <directionalLight position={[3, 5, 4]} intensity={3.2} />
-                <pointLight position={[-3, 1, 2]} intensity={18} color="#67e8f9" />
-                <Stars radius={35} depth={24} count={260} factor={2.2} fade speed={0.25} />
-                <AvatarErrorBoundary
-                  sourceUrl={briefing.sourceUrl}
-                  onFailure={() => setAvatarFailed(true)}
-                  inCanvas
+                <Canvas
+                  camera={{ position: [0, 0, 4], fov: 30 }}
+                  dpr={[1, 1.5]}
+                  gl={{ antialias: true, alpha: true }}
                 >
+                  <ambientLight intensity={2} />
+                  <directionalLight position={[3, 5, 4]} intensity={3.2} />
+                  <pointLight position={[-3, 1, 2]} intensity={18} color="#67e8f9" />
+                  <Stars radius={35} depth={24} count={260} factor={2.2} fade speed={0.25} />
                   <Suspense fallback={null}>
                     <AstronautAvatar path={briefing.avatarPath} />
                   </Suspense>
-                </AvatarErrorBoundary>
-              </Canvas>
-            </AvatarErrorBoundary>
-            <AvatarLoadStatus />
+                </Canvas>
+                <AvatarLoadStatus />
+              </AvatarErrorBoundary>
+            ) : (
+              <AvatarFallback
+                sourceUrl={briefing.sourceUrl}
+                message="3D model unavailable. Showing the mission director portrait."
+              />
+            )}
             <div className="absolute left-4 top-4 flex items-center gap-2 rounded-full border border-emerald-300/20 bg-slate-950/70 px-3 py-1.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-emerald-100 backdrop-blur">
               <span className="relative flex h-2 w-2">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-300 opacity-60" />
@@ -164,19 +191,6 @@ export function MissionDirector({ briefing, onStart }: MissionDirectorProps) {
               </span>
               Live comms
             </div>
-            {avatarFailed && (
-              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-slate-950/70 px-6 text-center" role="status">
-                <p className="text-sm font-medium text-white">Mission director model unavailable</p>
-                <a
-                  className="text-xs text-sky-200 underline underline-offset-4"
-                  href={briefing.sourceUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  View the official NASA model
-                </a>
-              </div>
-            )}
             <div className="pointer-events-none absolute bottom-4 left-4 right-4 flex items-center justify-center gap-2">
               <span className="h-px w-7 bg-sky-300/40" />
               <p className="text-[9px] font-medium uppercase tracking-[0.2em] text-slate-300">

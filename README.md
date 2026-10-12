@@ -8,7 +8,9 @@ Spacecraft appear assembled by default. Use **Disassemble** in the viewer to spr
 
 These are intentionally lightweight planning estimates, not flight dynamics. Solar panels provide 500, 1,000, or 1,500 W by size. Payload increases mass and science score, propellant and engine selection determine estimated delta-v, and installed modules affect mass and mission cost.
 
-Choose Mars Flyby, Europa Reconnaissance, Lunar Survey, or Earth Observation in **Mission selection** to see live requirements and readiness. **Test Mission** lists unmet criteria; passing the checks enables **Launch**. Instrument count can be adjusted from one to four in Build / Edit.
+Choose Mars Flyby, Europa Reconnaissance, Lunar Survey, or Earth Observation in **Mission selection** to see live requirements and readiness. **Test Mission** lists unmet criteria; after testing, use **Select Launch Vehicle** to compare payload capacity, remaining capacity, and cost before launching. Instrument count can be adjusted from one to four in Build / Edit.
+
+The launch-vehicle screen offers Small, Medium, and Heavy fictional launchers. Their payload capacities (1,500 / 5,000 / 15,000 kg) and launch costs ($60M / $100M / $180M) are simplified game-balancing values, not real-world rocket specifications. Values are centralized in `src/data/launchVehicles.ts` for later replacement. Available payload is calculated from the live configured launch mass, and launch cost is added to spacecraft and other mission costs before checking the configured and mission-specific budget limits. The selected vehicle and cost are retained in the mission results.
 
 The **Sustainability choices** panel exposes reusable/disposable propulsion, modular/integrated architecture, spare-parts policy, and an Earth-orbit end-of-life strategy. Their mass and cost deltas feed telemetry and mission checks; reliability and resource efficiency update live, with a qualitative sustainability assessment in mission results.
 

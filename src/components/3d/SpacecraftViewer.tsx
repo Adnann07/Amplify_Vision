@@ -1,6 +1,6 @@
 import { OrbitControls, Sparkles, Stars } from '@react-three/drei'
 import { Canvas, useThree } from '@react-three/fiber'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Component, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Box3,
   BufferGeometry,
@@ -43,6 +43,62 @@ type ViewerLoadState =
   | { spacecraftId: string; status: 'unavailable'; reason: string }
   | { spacecraftId: string; status: 'error'; message: string }
   | { spacecraftId: string; status: 'ready'; model: LoadedModel }
+
+interface SpacecraftCanvasBoundaryProps {
+  children: ReactNode
+  onFailure: () => void
+}
+
+interface SpacecraftCanvasBoundaryState {
+  failed: boolean
+}
+
+class SpacecraftCanvasBoundary extends Component<
+  SpacecraftCanvasBoundaryProps,
+  SpacecraftCanvasBoundaryState
+> {
+  state: SpacecraftCanvasBoundaryState = { failed: false }
+
+  static getDerivedStateFromError(): SpacecraftCanvasBoundaryState {
+    return { failed: true }
+  }
+
+  componentDidCatch(error: Error) {
+    console.warn('Spacecraft 3D viewer unavailable; showing its static fallback.', error.message)
+    this.props.onFailure()
+  }
+
+  render() {
+    return this.state.failed ? null : this.props.children
+  }
+}
+
+function SpacecraftViewerFallback({ spacecraft }: { spacecraft: SpacecraftSpec }) {
+  return (
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-6 pb-6 pt-14 text-center">
+      <svg
+        aria-hidden="true"
+        className="h-36 w-56 max-w-full drop-shadow-[0_0_24px_rgba(56,189,248,0.18)]"
+        viewBox="0 0 240 160"
+        fill="none"
+      >
+        <path d="m120 39 22 35-22 47-22-47 22-35Z" fill={spacecraft.accent} fillOpacity=".8" />
+        <path d="M108 72H42l-23 22 79-5m34-17h66l23 22-79-5" fill="#94a3b8" fillOpacity=".65" stroke="#cbd5e1" strokeWidth="2" strokeLinejoin="round" />
+        <path d="m112 112-17 21 18-7m15-14 17 21-18-7" fill="#38bdf8" fillOpacity=".6" />
+        <circle cx="120" cy="75" r="8" fill="#082f49" stroke="#e0f2fe" strokeWidth="2" />
+        <path d="M29 104h182M50 65v35m140-35v35" stroke={spacecraft.accent} strokeWidth="2" strokeOpacity=".8" />
+        <path d="m37 46 2 6 6 2-6 2-2 6-2-6-6-2 6-2 2-6Zm166 39 2 5 5 2-5 2-2 5-2-5-5-2 5-2 2-5Z" fill="#bae6fd" />
+      </svg>
+      <div>
+        <p className="text-sm font-medium text-white">3D viewer unavailable</p>
+        <p className="mt-1 max-w-sm text-xs leading-relaxed text-slate-300">
+          WebGL is unavailable in this browser. The spacecraft builder and live telemetry are still
+          available.
+        </p>
+      </div>
+    </div>
+  )
+}
 
 function disposeObject(root: Group) {
   const geometries = new Set<BufferGeometry>()
@@ -440,6 +496,7 @@ function ModelFramer({
 
 export function SpacecraftViewer({ spacecraft, build }: SpacecraftViewerProps) {
   const [attempt, setAttempt] = useState(0)
+  const [viewerFailed, setViewerFailed] = useState(false)
   const [assemblyState, setAssemblyState] = useState({
     spacecraftId: spacecraft.id,
     disassembled: false,
@@ -505,7 +562,7 @@ export function SpacecraftViewer({ spacecraft, build }: SpacecraftViewerProps) {
       <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between gap-2 border-b border-white/10 bg-slate-950/45 px-4 py-3 backdrop-blur-sm">
         <span className="text-[10px] uppercase tracking-[0.28em] text-sky-200/75">Mission model</span>
         <div className="flex items-center gap-2">
-          {currentState.status === 'ready' && (
+          {!viewerFailed && currentState.status === 'ready' && (
             <button
               type="button"
               aria-pressed={disassembled}
@@ -533,29 +590,38 @@ export function SpacecraftViewer({ spacecraft, build }: SpacecraftViewerProps) {
         </div>
       )}
 
-      <Canvas
-        camera={{ position: [0, 0, 4], fov: 38 }}
-        dpr={[1, 1.5]}
-        gl={{ antialias: true, alpha: false }}
-      >
-        <color attach="background" args={['#020912']} />
-        <ambientLight intensity={1.05} />
-        <directionalLight position={[5, 7, 5]} intensity={2.2} castShadow />
-        <pointLight position={[-5, 3, 2]} intensity={18} color={spacecraft.accent} />
-        <pointLight position={[0, -3, -2]} intensity={5} color="#93c5fd" />
-        <Stars radius={250} depth={150} count={1400} factor={3} fade speed={0.7} />
-        <Sparkles count={32} scale={[8, 5, 8]} size={2} speed={0.35} color={spacecraft.accent} />
-        {currentState.status === 'ready' && (
-          <ModelFramer
-            model={currentState.model}
-            build={build}
-            spacecraft={spacecraft}
-            disassembled={disassembled}
-          />
-        )}
-      </Canvas>
+      {!viewerFailed ? (
+        <SpacecraftCanvasBoundary
+          key={`${spacecraft.id}-${attempt}`}
+          onFailure={() => setViewerFailed(true)}
+        >
+          <Canvas
+            camera={{ position: [0, 0, 4], fov: 38 }}
+            dpr={[1, 1.5]}
+            gl={{ antialias: true, alpha: false }}
+          >
+            <color attach="background" args={['#020912']} />
+            <ambientLight intensity={1.05} />
+            <directionalLight position={[5, 7, 5]} intensity={2.2} castShadow />
+            <pointLight position={[-5, 3, 2]} intensity={18} color={spacecraft.accent} />
+            <pointLight position={[0, -3, -2]} intensity={5} color="#93c5fd" />
+            <Stars radius={250} depth={150} count={1400} factor={3} fade speed={0.7} />
+            <Sparkles count={32} scale={[8, 5, 8]} size={2} speed={0.35} color={spacecraft.accent} />
+            {currentState.status === 'ready' && (
+              <ModelFramer
+                model={currentState.model}
+                build={build}
+                spacecraft={spacecraft}
+                disassembled={disassembled}
+              />
+            )}
+          </Canvas>
+        </SpacecraftCanvasBoundary>
+      ) : (
+        <SpacecraftViewerFallback spacecraft={spacecraft} />
+      )}
 
-      {currentState.status === 'loading' && (
+      {!viewerFailed && currentState.status === 'loading' && (
         <div
           className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-slate-950/55 pt-8 backdrop-blur-[2px]"
           role="status"
