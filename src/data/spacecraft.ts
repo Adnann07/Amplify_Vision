@@ -563,6 +563,244 @@ export const spacecraftCatalog: SpacecraftSpec[] = [
         'NASA lists a Landsat 9 printable STL model; a compatible direct file was not verified for the application’s model loader.',
     },
   },
+  {
+    id: 'jwst',
+    name: 'James Webb Space Telescope',
+    agency: 'NASA / ESA / CSA',
+    type: 'Infrared space observatory',
+    missionCategory: 'Space observatories',
+    missionStatus: 'Operational at Sun-Earth L2',
+    description:
+      'Large infrared observatory with a segmented primary mirror and deployable sunshield.',
+    missionPurpose:
+      'Observe the early universe, exoplanets, and objects in the Solar System using infrared instruments.',
+    destination: 'Sun-Earth L2',
+    mass: 6200,
+    power: 2000,
+    communication: 'Deep-space relay and high-gain antenna',
+    propulsionSystem: 'Station-keeping; not modeled independently',
+    powerSystem: 'Solar array',
+    instruments: ['NIRCam', 'NIRSpec', 'MIRI', 'NIRISS / FGS'],
+    reliability: 94,
+    cost: 6500,
+    accent: '#fbbf24',
+    missionSourceUrl: 'https://science.nasa.gov/mission/webb/',
+    assetAttribution: 'NASA-3D-Resources contributors',
+    assetUsageNotes:
+      'The compact NASA-3D-Resources (B) GLB is used to keep viewer mesh and transfer sizes low. The repository describes its assets as free and without copyright; review NASA media usage guidance.',
+    gameplayNote:
+      'Mass, power, reliability, and cost are rounded gameplay values, not flight specifications. Sun-Earth L2 transfer, deployment, station-keeping, cryogenic operations, and instrument performance are not simulated.',
+    model: {
+      format: 'glb',
+      modelPath: '/models/jwst/JamesWebbSpaceTelescopeB.glb',
+      sourceUrl:
+        'https://github.com/nasa/NASA-3D-Resources/tree/master/3D%20Models/James%20Webb%20Space%20Telescope%20(B)',
+    },
+  },
+  {
+    id: 'parker-solar-probe',
+    name: 'Parker Solar Probe',
+    agency: 'NASA / Johns Hopkins APL',
+    type: 'Solar science probe',
+    missionCategory: 'Deep-space probes',
+    missionStatus: 'Active solar mission',
+    description:
+      'Solar probe designed to study the corona and solar wind during repeated close passes of the Sun.',
+    missionPurpose:
+      'Measure solar-wind particles, fields, and coronal structure in the near-Sun environment.',
+    destination: 'Inner solar system',
+    mass: 685,
+    power: 600,
+    communication: 'Deep-space high-gain communications',
+    propulsionSystem: 'Solar-orbit targeting; trajectory not modeled independently',
+    powerSystem: 'Solar arrays with thermal protection',
+    instruments: ['FIELDS', 'WISPR', 'SWEAP', 'ISʘIS'],
+    reliability: 91,
+    cost: 2400,
+    accent: '#fb923c',
+    missionSourceUrl: 'https://science.nasa.gov/mission/parker-solar-probe/',
+    assetAttribution: 'NASA-3D-Resources contributors',
+    assetUsageNotes:
+      'NASA-3D-Resources GLB model. The repository describes its assets as free and without copyright; review NASA media usage guidance.',
+    gameplayNote:
+      'Mass, power, reliability, and cost are rounded gameplay values, not flight specifications. Solar passages, perihelion, thermal loads, and solar-wind measurements are not simulated.',
+    model: {
+      format: 'glb',
+      modelPath: '/models/parker-solar-probe/ParkerSolarProbe.glb',
+      sourceUrl:
+        'https://github.com/nasa/NASA-3D-Resources/tree/master/3D%20Models/Parker%20Solar%20Probe',
+    },
+  },
+  {
+    id: 'juno',
+    name: 'Juno',
+    agency: 'NASA / JPL',
+    type: 'Jupiter science orbiter',
+    missionCategory: 'Planetary science',
+    missionStatus: 'Extended mission in the Jupiter system',
+    description:
+      'Solar-powered orbiter investigating Jupiter’s atmosphere, interior, magnetic field, and auroras.',
+    missionPurpose:
+      'Study Jupiter’s origin and evolution with microwave, infrared, magnetic-field, and particle measurements.',
+    destination: 'Jupiter',
+    mass: 3600,
+    power: 700,
+    communication: 'Deep-space high-gain communications',
+    propulsionSystem: 'Chemical propulsion and orbital maneuvers; simplified in this game',
+    powerSystem: 'Large solar arrays',
+    instruments: ['JIRAM', 'MWR', 'MAG', 'UVS', 'JEDI'],
+    reliability: 91,
+    cost: 4200,
+    accent: '#c4b5fd',
+    missionSourceUrl: 'https://science.nasa.gov/mission/juno/',
+    assetAttribution: 'NASA-3D-Resources contributors',
+    assetUsageNotes:
+      'The compact NASA-3D-Resources (B) GLB is used instead of the larger (A) variant. The repository describes its assets as free and without copyright; review NASA media usage guidance.',
+    gameplayNote:
+      'Mass, power, reliability, and cost are rounded gameplay values, not flight specifications. Jupiter orbit insertion, radiation exposure, and Juno science operations are not simulated.',
+    model: {
+      format: 'glb',
+      modelPath: '/models/juno/JunoB.glb',
+      sourceUrl:
+        'https://github.com/nasa/NASA-3D-Resources/tree/master/3D%20Models/Juno%20(B)',
+    },
+  },
+  {
+    id: 'roman',
+    name: 'Nancy Grace Roman Space Telescope',
+    agency: 'NASA',
+    type: 'Wide-field space observatory',
+    missionCategory: 'Space observatories',
+    missionStatus: 'Pre-launch observatory development',
+    description:
+      'Wide-field infrared observatory designed to survey dark energy, exoplanets, and the infrared sky.',
+    missionPurpose:
+      'Conduct wide-field near-infrared surveys and demonstrate coronagraph technology.',
+    destination: 'Sun-Earth L2',
+    mass: 6200,
+    power: 2000,
+    communication: 'Deep-space high-gain communications',
+    propulsionSystem: 'Station-keeping; not modeled independently',
+    powerSystem: 'Solar array',
+    instruments: ['Wide Field Instrument', 'Coronagraph Instrument'],
+    reliability: 92,
+    cost: 6200,
+    accent: '#818cf8',
+    missionSourceUrl: 'https://science.nasa.gov/mission/roman-space-telescope/',
+    assetAttribution: 'NASA-3D-Resources contributors',
+    assetUsageNotes:
+      'The compact NASA-3D-Resources (B) GLB is used rather than the larger (A) variant. The repository describes its assets as free and without copyright; review NASA media usage guidance.',
+    gameplayNote:
+      'Mass, power, reliability, and cost are rounded gameplay values, not flight specifications. Sun-Earth L2 transfer, deployment, station-keeping, and coronagraph operations are not simulated.',
+    model: {
+      format: 'glb',
+      modelPath: '/models/roman/RomanSpaceTelescopeB.glb',
+      sourceUrl:
+        'https://github.com/nasa/NASA-3D-Resources/tree/master/3D%20Models/Nancy%20Grace%20Roman%20Space%20Telescope%20(B)',
+    },
+  },
+  {
+    id: 'ingenuity',
+    name: 'Ingenuity Mars Helicopter',
+    agency: 'NASA / JPL',
+    type: 'Planetary aerial technology demonstrator',
+    missionCategory: 'Planetary aerial vehicles',
+    missionStatus: 'Mission complete',
+    description:
+      'Small rotorcraft that demonstrated powered, controlled flight in the thin Martian atmosphere.',
+    missionPurpose:
+      'Demonstrate powered flight and scout aerial mobility on Mars.',
+    destination: 'Mars surface',
+    mass: 2,
+    power: 100,
+    communication: 'Mars rover relay',
+    propulsionSystem: 'Battery-powered rotor flight; flight dynamics not simulated',
+    powerSystem: 'Solar-charged battery',
+    instruments: ['Navigation cameras', 'Inertial sensors', 'Environmental sensors'],
+    reliability: 89,
+    cost: 900,
+    accent: '#67e8f9',
+    missionSourceUrl: 'https://science.nasa.gov/mission/mars-2020-ingenuity-helicopter/',
+    assetAttribution: 'NASA-3D-Resources contributors',
+    assetUsageNotes:
+      'NASA-3D-Resources GLB model. The repository describes its assets as free and without copyright; review NASA media usage guidance.',
+    gameplayNote:
+      'Mass, power, reliability, and cost are simplified gameplay values. Mars atmospheric flight, rotor performance, surface mobility, and rover-relay operations are not simulated.',
+    model: {
+      format: 'glb',
+      modelPath: '/models/ingenuity/IngenuityMarsHelicopter.glb',
+      sourceUrl:
+        'https://github.com/nasa/NASA-3D-Resources/tree/master/3D%20Models/Ingenuity%20Mars%20Helicopter',
+    },
+  },
+  {
+    id: 'landsat-8',
+    name: 'Landsat 8',
+    agency: 'NASA / USGS',
+    type: 'Earth-observation satellite',
+    missionCategory: 'Earth observation',
+    missionStatus: 'Operational Earth-imaging mission',
+    description:
+      'Earth-observing satellite carrying optical and thermal sensors for the Landsat land-imaging record.',
+    missionPurpose:
+      'Collect multispectral land observations with the Operational Land Imager and Thermal Infrared Sensor.',
+    destination: 'Earth orbit',
+    mass: 2800,
+    power: 1300,
+    communication: 'Earth-orbit data downlink',
+    propulsionSystem: 'Orbit maintenance; simplified in this game',
+    powerSystem: 'Solar arrays',
+    instruments: ['Operational Land Imager (OLI)', 'Thermal Infrared Sensor (TIRS)'],
+    reliability: 92,
+    cost: 2700,
+    accent: '#4ade80',
+    missionSourceUrl: 'https://landsat.gsfc.nasa.gov/satellites/landsat-8/',
+    assetAttribution: 'NASA-3D-Resources contributors',
+    assetUsageNotes:
+      'NASA-3D-Resources GLB model. The repository describes its assets as free and without copyright; review NASA media usage guidance.',
+    gameplayNote:
+      'Mass, power, reliability, and cost are rounded gameplay values, not flight specifications. Spectral-band performance, image data volume, revisit coverage, and ground-station scheduling are not simulated.',
+    model: {
+      format: 'glb',
+      modelPath: '/models/landsat-8/Landsat8.glb',
+      sourceUrl:
+        'https://github.com/nasa/NASA-3D-Resources/tree/master/3D%20Models/Landsat%208',
+    },
+  },
+  {
+    id: 'dscovr',
+    name: 'Deep Space Climate Observatory (DSCOVR)',
+    agency: 'NASA / NOAA / U.S. Air Force',
+    type: 'Earth and space-weather observatory',
+    missionCategory: 'Space weather monitoring',
+    missionStatus: 'Operational at Sun-Earth L1',
+    description:
+      'Observatory monitoring solar wind and providing continuous views of the sunlit Earth.',
+    missionPurpose:
+      'Provide solar-wind observations and Earth-observation data from the Sun-Earth L1 region.',
+    destination: 'Sun-Earth L1',
+    mass: 570,
+    power: 600,
+    communication: 'Deep-space communications and data relay',
+    propulsionSystem: 'L1 station-keeping; not modeled independently',
+    powerSystem: 'Solar arrays',
+    instruments: ['EPIC Earth imager', 'NISTAR radiometer', 'Plasma-Magnetometer'],
+    reliability: 90,
+    cost: 2100,
+    accent: '#38bdf8',
+    missionSourceUrl: 'https://science.nasa.gov/mission/dscovr/',
+    assetAttribution: 'NASA-3D-Resources contributors',
+    assetUsageNotes:
+      'NASA-3D-Resources (Triana) GLB model. The repository describes its assets as free and without copyright; review NASA media usage guidance.',
+    gameplayNote:
+      'Mass, power, reliability, and cost are rounded gameplay values, not flight specifications. The game uses an Earth-orbit proxy and does not simulate the L1 transfer, station-keeping, EPIC, or solar-wind observations.',
+    model: {
+      format: 'glb',
+      modelPath: '/models/dscovr/DSCOVR.glb',
+      sourceUrl:
+        'https://github.com/nasa/NASA-3D-Resources/tree/master/3D%20Models/Deep%20Space%20Climate%20Observatory%20(DSCOVR)%20(Triana)',
+    },
+  },
 ]
 
 export const availableSpacecraftCatalog = spacecraftCatalog.filter(
@@ -611,6 +849,14 @@ export const destinations: DestinationOption[] = [
     environment: 'Radiation-heavy ice shell',
     risk: 62,
     transfer: '2-5 years',
+  },
+  {
+    id: 'jupiter',
+    label: 'Jupiter',
+    distance: 'Varies by date',
+    environment: 'Gas giant system + intense radiation environment',
+    risk: 70,
+    transfer: 'Preliminary estimate only',
   },
   {
     id: 'saturn',

@@ -20,7 +20,7 @@ class PreviewErrorBoundary extends Component<
   }
 
   componentDidCatch(error: Error) {
-    console.error('NASA SLS preview model could not be loaded; showing the detailed built-in 3D launcher.', error)
+    console.error('NASA SLS Block 1 preview could not be loaded; showing the detailed built-in generic heavy launcher.', error)
   }
 
   render() {
@@ -59,7 +59,11 @@ function PreviewStage({ vehicle, onReady }: { vehicle: LaunchVehicleSpec; onRead
         {variant === 'heavy' ? (
           <PreviewErrorBoundary fallback={procedural}>
             <Suspense fallback={null}>
-              <NasaSlsRocket onReady={onReady} />
+              {vehicle.model?.format === 'stl' ? (
+                <NasaSlsRocket modelPath={vehicle.model.modelPath} onReady={onReady} />
+              ) : (
+                procedural
+              )}
             </Suspense>
           </PreviewErrorBoundary>
         ) : (
@@ -81,7 +85,7 @@ function PreviewCamera() {
 }
 
 export function LaunchVehiclePreview({ vehicle }: { vehicle: LaunchVehicleSpec }) {
-  const [assetReady, setAssetReady] = useState(vehicle.visualClass !== 'heavy')
+  const [assetReady, setAssetReady] = useState(vehicle.model?.format !== 'stl')
   const handleReady = useCallback(() => setAssetReady(true), [])
 
   return (

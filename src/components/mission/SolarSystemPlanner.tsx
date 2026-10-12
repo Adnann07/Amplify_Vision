@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { heliocentricBodies } from '../../data/planetaryData'
 import { distanceBetween, estimateHohmannTransfer } from '../../data/missionPlanner'
 import type { HorizonsPosition } from '../../data/horizonsService'
@@ -34,6 +34,10 @@ function shiftDate(date: string, days: number) {
   return shifted.toISOString().slice(0, 10)
 }
 
+const MIN_SCENE_ZOOM = 0.75
+const MAX_SCENE_ZOOM = 2.5
+const SCENE_ZOOM_STEP = 1.2
+
 export function SolarSystemPlanner({
   mode,
   launchDate,
@@ -50,6 +54,7 @@ export function SolarSystemPlanner({
   planningOnlySourceUrl,
   planningOnlyIsLiveEvent = false,
 }: SolarSystemPlannerProps) {
+  const [sceneZoom, setSceneZoom] = useState(1.35)
   const byBody = new Map(positions.map((position) => [position.bodyId, position]))
   const earth = byBody.get('earth')
   const selectedBody = heliocentricBodies.find((body) => body.id === selectedBodyId) ?? heliocentricBodies[0]
@@ -59,6 +64,12 @@ export function SolarSystemPlanner({
     earth && selectedPosition && selectedBody.id !== 'earth'
       ? estimateHohmannTransfer(earth, selectedPosition)
       : null
+
+  const adjustSceneZoom = (factor: number) => {
+    setSceneZoom((currentZoom) =>
+      Math.min(MAX_SCENE_ZOOM, Math.max(MIN_SCENE_ZOOM, currentZoom * factor)),
+    )
+  }
 
   if (planningOnly) {
     return (
@@ -130,6 +141,10 @@ export function SolarSystemPlanner({
         <div>
           <div
             className="relative aspect-[1.8] overflow-hidden rounded-2xl border border-white/8 bg-[#050d17]"
+            onWheel={(event) => {
+              event.preventDefault()
+              adjustSceneZoom(event.deltaY < 0 ? SCENE_ZOOM_STEP : 1 / SCENE_ZOOM_STEP)
+            }}
             role="group"
             aria-label={`Interactive 3D heliocentric positions for ${launchDate}; visual radii are compressed and planet sizes are not to scale`}
           >
@@ -139,9 +154,33 @@ export function SolarSystemPlanner({
                   positions={positions}
                   selectedBodyId={selectedBody.id}
                   onSelectBody={onSelectBody}
+                  zoom={sceneZoom}
                 />
               </Suspense>
             )}
+            <div className="absolute right-3 top-3 flex items-center gap-1 rounded-xl border border-white/10 bg-slate-950/80 p-1 backdrop-blur">
+              <button
+                type="button"
+                aria-label="Zoom out on planetary positions"
+                onClick={() => adjustSceneZoom(1 / SCENE_ZOOM_STEP)}
+                disabled={sceneZoom <= MIN_SCENE_ZOOM}
+                className="grid h-8 w-8 place-items-center rounded-lg text-lg text-slate-100 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                −
+              </button>
+              <span className="min-w-12 text-center text-[10px] tabular-nums text-slate-300" aria-live="polite">
+                {Math.round(sceneZoom * 100)}%
+              </span>
+              <button
+                type="button"
+                aria-label="Zoom in on planetary positions"
+                onClick={() => adjustSceneZoom(SCENE_ZOOM_STEP)}
+                disabled={sceneZoom >= MAX_SCENE_ZOOM}
+                className="grid h-8 w-8 place-items-center rounded-lg text-lg text-slate-100 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                +
+              </button>
+            </div>
             {loading && (
               <div className="absolute inset-0 grid place-items-center bg-slate-950/60 text-xs text-slate-200" role="status" aria-live="polite">
                 Loading Horizons ephemerides…
@@ -206,14 +245,25 @@ export function SolarSystemPlanner({
             </p>
           )}
           {mode === 'freeplay' ? (
-            <button
-              type="button"
-              disabled={!selectedBody.destinationId || selectedDestinationId === selectedBody.destinationId}
-              onClick={() => selectedBody.destinationId && onSetDestination(selectedBody.destinationId)}
-              className="mt-4 w-full rounded-xl border border-cyan-300/20 bg-cyan-300/10 px-3 py-2.5 text-xs font-semibold text-cyan-50 transition hover:bg-cyan-300/15 disabled:cursor-not-allowed disabled:opacity-45"
-            >
-              {selectedBody.destinationId ? 'Set as Freeplay destination' : 'No game destination for this body'}
-            </button>
+            <>
+              <button
+                type="button"
+                disabled={!selectedBody.destinationId || selectedDestinationId === selectedBody.destinationId}
+                onClick={() => selectedBody.destinationId && onSetDestination(selectedBody.destinationId)}
+                className="mt-4 w-full rounded-xl border border-cyan-300/20 bg-cyan-300/10 px-3 py-2.5 text-xs font-semibold text-cyan-50 transition hover:bg-cyan-300/15 disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                {selectedBody.destinationId ? 'Set as Freeplay destination' : 'No game destination for this body'}
+              </button>
+              {selectedBody.id === 'jupiter' && selectedDestinationId !== 'europa' && (
+                <button
+                  type="button"
+                  onClick={() => onSetDestination('europa')}
+                  className="mt-2 w-full rounded-xl border border-amber-300/15 bg-amber-300/5 px-3 py-2.5 text-xs font-medium text-amber-100 transition hover:bg-amber-300/10"
+                >
+                  Use Jupiter position as Europa proxy
+                </button>
+              )}
+            </>
           ) : (
             <p className="mt-4 rounded-xl border border-violet-300/15 bg-violet-300/5 p-3 text-[10px] leading-relaxed text-violet-100">
               Inspection only — {selectedDestinationId} remains the campaign’s prescribed destination.

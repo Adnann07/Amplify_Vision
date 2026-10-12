@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   antennaOptions,
   buildComponentLabels,
@@ -26,6 +26,7 @@ import {
   propulsionOptions,
 } from './data/spacecraft'
 import { launchVehicles, type LaunchRecord, type LaunchVehicleSpec } from './data/launchVehicles'
+import { getPlanetaryBodyForDestination } from './data/planetaryData'
 import { LaunchResults, LaunchVehicleSelection } from './components/mission/LaunchVehicleSelection'
 import { assessLaunchOutcome } from './data/launchOutcome'
 import { HomeScreen, CampaignSelectionScreen } from './components/mission/GameModeSelection'
@@ -52,11 +53,26 @@ import { SolarSystemPlanner } from './components/mission/SolarSystemPlanner'
 import { loadSolarSystemPositions, type HorizonsPosition } from './data/horizonsService'
 import { heliocentricBodies } from './data/planetaryData'
 import { estimateHohmannTransfer } from './data/missionPlanner'
+import {
+  advanceMissionControl,
+  createMissionControlSession,
+  clearMissionControlSession,
+  loadMissionControlSession,
+  saveMissionControlSession,
+  type MissionControlSession,
+} from './data/missionControlSimulation'
 
 type GameMode = 'mission' | 'freeplay'
 type EntryScreen = 'home' | 'campaign' | 'events' | 'briefing' | 'builder'
 type BriefingOrigin = 'campaign' | 'builder'
-type LaunchScreen = 'builder' | 'selection' | 'results' | 'simulation' | 'report'
+type LaunchScreen =
+  | 'builder'
+  | 'selection'
+  | 'results'
+  | 'simulation'
+  | 'report'
+  | 'mission-control'
+  | 'mission-overview'
 
 interface CampaignState {
   progress: CampaignProgress
@@ -76,6 +92,9 @@ const MissionControlChat = lazy(() =>
 )
 const SpaceWeatherControl = lazy(() =>
   import('./components/mission/SpaceWeatherControl').then((module) => ({ default: module.SpaceWeatherControl })),
+)
+const MissionControlPage = lazy(() =>
+  import('./components/mission/MissionControl').then((module) => ({ default: module.MissionControl })),
 )
 
 function clamp(value: number, min: number, max: number) {
@@ -116,23 +135,135 @@ function MissionDataTable({ title, rows }: MissionDataTableProps) {
   )
 }
 
+function MissionOverview({
+  session,
+  onEnterMissionControl,
+  onRunAssessment,
+  onExit,
+}: {
+  session: MissionControlSession
+  onEnterMissionControl: () => void
+  onRunAssessment: () => void
+  onExit: () => void
+}) {
+  const { record, state } = session
+  const elapsedMinutes = Math.floor(state.elapsedSeconds / 60)
+  const completedOperations = [
+    true,
+    state.communicationEstablished,
+    state.observationsCompleted > 0,
+    state.dataDownlinkedMb > 0,
+  ].filter(Boolean).length
+
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-[#03080e] px-4 py-10 text-slate-100">
+      <section className="w-full max-w-4xl border border-cyan-300/20 bg-[#07111d] shadow-2xl">
+        <header className="border-b border-slate-700/60 p-6 sm:p-8">
+          <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-cyan-300/75">
+            Flight operations · deployed mission
+          </p>
+          <h1 className="mt-3 text-3xl font-semibold text-white">{session.missionTitle}</h1>
+          <p className="mt-2 text-sm text-slate-400">{record.spacecraftName} · {record.destination}</p>
+        </header>
+        <div className="grid gap-0 sm:grid-cols-2">
+          {[
+            ['Launch status', 'Spacecraft deployed'],
+            ['Launch vehicle', record.launchVehicle.name],
+            ['Mission elapsed time', `${elapsedMinutes} simulated min`],
+            ['Operations milestones', `${completedOperations} / 4 complete`],
+            ['Recorded launch mass', `${record.spacecraftMassKg.toLocaleString()} kg`],
+            ['Design power generation', `${record.missionTelemetry.power.toLocaleString()} W`],
+          ].map(([label, value]) => (
+            <div key={label} className="border-b border-r border-slate-800 p-4 sm:p-5">
+              <p className="text-[9px] font-semibold uppercase tracking-[0.15em] text-slate-500">{label}</p>
+              <p className="mt-2 text-sm font-medium text-slate-100">{value}</p>
+            </div>
+          ))}
+        </div>
+        <div className="p-6 sm:p-8">
+          <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-slate-500">Primary mission objective</p>
+          <p className="mt-2 text-sm leading-relaxed text-slate-200">{session.missionObjective}</p>
+          <p className="mt-3 text-xs leading-relaxed text-amber-100/75">
+            Deployment is confirmed; mission completion has not been declared. Operations telemetry is illustrative and the campaign assessment remains a separate evaluation.
+          </p>
+          <div className="mt-6 grid gap-3 sm:grid-cols-3">
+            <button
+              type="button"
+              onClick={onEnterMissionControl}
+              className="border border-cyan-300/40 bg-cyan-300/[0.1] px-4 py-3 text-xs font-bold uppercase tracking-[0.12em] text-cyan-50 transition hover:bg-cyan-300/[0.16]"
+            >
+              Enter Mission Control
+            </button>
+            {record.mode === 'mission' && (
+              <button
+                type="button"
+                onClick={onRunAssessment}
+                className="border border-emerald-300/25 bg-emerald-300/[0.06] px-4 py-3 text-xs font-semibold uppercase tracking-[0.1em] text-emerald-100 transition hover:bg-emerald-300/[0.1]"
+              >
+                Run campaign assessment
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onExit}
+              className="border border-slate-700 px-4 py-3 text-xs font-semibold uppercase tracking-[0.1em] text-slate-300 transition hover:border-slate-500 hover:text-white"
+            >
+              Return to game modes
+            </button>
+          </div>
+        </div>
+      </section>
+    </main>
+  )
+}
+
 function App() {
+  const [missionControlRestore] = useState(loadMissionControlSession)
+  const [missionControlSession, setMissionControlSession] =
+    useState<MissionControlSession | null>(missionControlRestore.session)
+  const [missionControlWarning, setMissionControlWarning] =
+    useState<string | null>(missionControlRestore.warning)
+  const missionControlSessionRef = useRef(missionControlRestore.session)
   const [entryScreen, setEntryScreen] = useState<EntryScreen>('home')
   const [briefingOrigin, setBriefingOrigin] = useState<BriefingOrigin>('campaign')
-  const [gameMode, setGameMode] = useState<GameMode | null>(null)
-  const [selectedSpacecraft, setSelectedSpacecraft] = useState(availableSpacecraftCatalog[0])
-  const [selectedCampaignMissionId, setSelectedCampaignMissionId] = useState(campaignMissions[0].id)
-  const [selectedMissionId, setSelectedMissionId] = useState('earth-observation')
+  const [gameMode, setGameMode] = useState<GameMode | null>(
+    missionControlRestore.session?.record.mode ?? null,
+  )
+  const [selectedSpacecraft, setSelectedSpacecraft] = useState(() =>
+    availableSpacecraftCatalog.find(
+      (spacecraft) =>
+        spacecraft.id === missionControlRestore.session?.record.spacecraftId ||
+        spacecraft.name === missionControlRestore.session?.record.spacecraftName,
+    ) ?? availableSpacecraftCatalog[0],
+  )
+  const [selectedCampaignMissionId, setSelectedCampaignMissionId] = useState(
+    missionControlRestore.session?.campaignMissionId ?? campaignMissions[0].id,
+  )
+  const [selectedMissionId, setSelectedMissionId] = useState(
+    missionControlRestore.session?.missionGoalId ?? 'earth-observation',
+  )
   const [testedDesign, setTestedDesign] = useState<string | null>(null)
-  const [launchScreen, setLaunchScreen] = useState<LaunchScreen>('builder')
-  const [selectedLaunchVehicleId, setSelectedLaunchVehicleId] = useState<string | null>(null)
-  const [launchRecord, setLaunchRecord] = useState<LaunchRecord | null>(null)
+  const [launchScreen, setLaunchScreen] = useState<LaunchScreen>(() =>
+    missionControlRestore.session && window.location.hash === '#mission-control'
+      ? 'mission-control'
+      : missionControlRestore.session && window.location.hash === '#mission-overview'
+        ? 'mission-overview'
+        : 'builder',
+  )
+  const [selectedLaunchVehicleId, setSelectedLaunchVehicleId] = useState<string | null>(
+    missionControlRestore.session?.record.launchVehicle.id ?? null,
+  )
+  const [launchRecord, setLaunchRecord] = useState<LaunchRecord | null>(
+    missionControlRestore.session?.record ?? null,
+  )
   const [campaignEvaluation, setCampaignEvaluation] = useState<StoredCampaignEvaluation | null>(null)
   const [campaignState, setCampaignState] = useState<CampaignState>(() => {
     const loaded = loadCampaignProgress()
     return { progress: loaded.progress, storageWarning: loaded.warning }
   })
-  const [launchAttempt, setLaunchAttempt] = useState(0)
+  const [launchAttempt, setLaunchAttempt] = useState(
+    missionControlRestore.session?.record.attemptId ?? 0,
+  )
   const [selectedDestinationId, setSelectedDestinationId] = useState(destinations[0].id)
   const [selectedPlannerBodyId, setSelectedPlannerBodyId] = useState('earth')
   const [launchDate, setLaunchDate] = useState(() => new Date().toISOString().slice(0, 10))
@@ -150,6 +281,11 @@ function App() {
   const [riskTolerance, setRiskTolerance] = useState(38)
 
   const campaignProgress = campaignState.progress
+  const updateMissionControlSession = useCallback((session: MissionControlSession) => {
+    missionControlSessionRef.current = session
+    setMissionControlSession(session)
+    setMissionControlWarning(saveMissionControlSession(session))
+  }, [])
   const availableCampaignMissions = useMemo(
     () => [...campaignMissions, ...campaignProgress.eventMissions],
     [campaignProgress.eventMissions],
@@ -180,6 +316,65 @@ function App() {
       })
     return () => controller.abort()
   }, [entryScreen, isAsteroidPlanningExercise, launchDate, launchScreen])
+
+  const missionControlRunning =
+    missionControlSession !== null && !missionControlSession.state.paused
+  useEffect(() => {
+    if (!missionControlRunning) return
+    const intervalId = window.setInterval(() => {
+      const current = missionControlSessionRef.current
+      if (!current || current.state.paused) return
+      const state = advanceMissionControl(current.record, current.state)
+      if (state === current.state) return
+      updateMissionControlSession({ ...current, state })
+    }, 1000)
+    return () => window.clearInterval(intervalId)
+  }, [missionControlRunning, updateMissionControlSession])
+
+  useEffect(() => {
+    const handleHistoryNavigation = () => {
+      if (window.location.hash === '#mission-control') {
+        const restored = loadMissionControlSession()
+        if (!restored.session) {
+          setMissionControlWarning(restored.warning ?? 'No deployed mission is available to restore.')
+          setLaunchScreen('builder')
+          return
+        }
+        setMissionControlSession(restored.session)
+        missionControlSessionRef.current = restored.session
+        setLaunchRecord(restored.session.record)
+        setGameMode(restored.session.record.mode)
+        setSelectedCampaignMissionId(
+          restored.session.campaignMissionId ?? campaignMissions[0].id,
+        )
+        setSelectedMissionId(restored.session.missionGoalId)
+        setSelectedSpacecraft(
+          availableSpacecraftCatalog.find(
+            (spacecraft) =>
+              spacecraft.id === restored.session?.record.spacecraftId ||
+              spacecraft.name === restored.session?.record.spacecraftName,
+          ) ?? availableSpacecraftCatalog[0],
+        )
+        setMissionControlWarning(saveMissionControlSession(restored.session))
+        setLaunchScreen('mission-control')
+        return
+      }
+      if (window.location.hash === '#mission-overview') {
+        setLaunchScreen('mission-overview')
+        return
+      }
+      if (launchScreen === 'mission-control') {
+        setLaunchScreen('mission-overview')
+        return
+      }
+      if (launchScreen === 'mission-overview') {
+        setEntryScreen('home')
+        setLaunchScreen('builder')
+      }
+    }
+    window.addEventListener('popstate', handleHistoryNavigation)
+    return () => window.removeEventListener('popstate', handleHistoryNavigation)
+  }, [launchScreen])
 
   const selectedDestination =
     destinations.find((destination) => destination.id === selectedDestinationId) ?? destinations[0]
@@ -332,6 +527,14 @@ function App() {
   const availableComponents: BuildComponentId[] = ['solarPanel', 'antenna', 'engine', 'instrument']
   const updateBuild = <Key extends keyof typeof build>(key: Key, value: (typeof build)[Key]) =>
     setBuild((current) => ({ ...current, [key]: value }))
+  const clearSavedMissionControl = () => {
+    missionControlSessionRef.current = null
+    setMissionControlSession(null)
+    setMissionControlWarning(clearMissionControlSession())
+    if (window.location.hash) {
+      window.history.replaceState({}, '', `${window.location.pathname}${window.location.search}`)
+    }
+  }
   const updateLaunchDate = (date: string) => {
     if (date === launchDate) return
     setPlannerLoading(true)
@@ -368,6 +571,7 @@ function App() {
     screen: 'briefing' | 'builder' = 'briefing',
     missions: CampaignMission[] = availableCampaignMissions,
   ) => {
+    clearSavedMissionControl()
     const campaignMission = resolveCampaignMission(
       missionId,
       campaignProgress.completedMissionIds,
@@ -383,9 +587,7 @@ function App() {
     )
     if (recommendedSpacecraft) setSelectedSpacecraft(recommendedSpacecraft)
     setSelectedDestinationId(missionGoal.destinationId)
-    setSelectedPlannerBodyId(
-      heliocentricBodies.find((body) => body.destinationId === missionGoal.destinationId)?.id ?? 'earth',
-    )
+    setSelectedPlannerBodyId(getPlanetaryBodyForDestination(missionGoal.destinationId)?.id ?? 'earth')
     setSelectedLaunchVehicleId(null)
     setTestedDesign(null)
     setBriefingOrigin('campaign')
@@ -482,7 +684,9 @@ function App() {
     setLaunchRecord({
       attemptId,
       mode: gameMode ?? 'mission',
-      missionName: gameMode === 'freeplay' ? 'Freeplay Sandbox' : selectedMission.name,
+      missionName: gameMode === 'freeplay'
+        ? selectedMission.name
+        : selectedCampaignMission.title,
       destination: selectedDestination.label,
       planningSnapshot: {
         launchDate,
@@ -491,6 +695,10 @@ function App() {
         transferEstimate,
       },
       spacecraftName: selectedSpacecraft.name,
+      spacecraftId: selectedSpacecraft.id,
+      spacecraftType: selectedSpacecraft.type,
+      spacecraftModel: selectedSpacecraft.model,
+      spacecraftBuild: { ...build, components: [...build.components] },
       spacecraftMassKg: buildStats.mass,
       existingMissionCostMillions: buildStats.missionCost,
       launchVehicle: vehicle,
@@ -511,6 +719,47 @@ function App() {
       ...assessment,
     })
     setLaunchScreen('results')
+  }
+
+  const enterMissionControl = () => {
+    if (!launchRecord || launchRecord.outcome !== 'success') {
+      setMissionControlWarning('Mission Control opens only after successful spacecraft deployment.')
+      return
+    }
+    const missionTitle = gameMode === 'mission' ? selectedCampaignMission.title : selectedMission.name
+    const missionObjective = gameMode === 'mission'
+      ? selectedCampaignMission.objective
+      : selectedMission.description
+    const missionGoalId = gameMode === 'mission'
+      ? selectedCampaignMission.missionGoalId
+      : selectedMission.id
+    const session = createMissionControlSession(launchRecord, {
+      missionId: gameMode === 'mission' ? selectedCampaignMission.id : selectedMission.id,
+      missionTitle,
+      missionObjective,
+      missionGoalId,
+      campaignMissionId: gameMode === 'mission' ? selectedCampaignMission.id : null,
+    })
+    updateMissionControlSession(session)
+    window.history.pushState({}, '', `${window.location.pathname}${window.location.search}#mission-control`)
+    setLaunchScreen('mission-control')
+  }
+
+  const returnToMissionOverview = () => {
+    window.history.pushState({}, '', `${window.location.pathname}${window.location.search}#mission-overview`)
+    setLaunchScreen('mission-overview')
+  }
+
+  const openMissionControl = () => {
+    if (!missionControlSession) return
+    window.history.pushState({}, '', `${window.location.pathname}${window.location.search}#mission-control`)
+    setLaunchScreen('mission-control')
+  }
+
+  const runMissionControlAssessment = () => {
+    if (!missionControlSession || missionControlSession.record.mode !== 'mission') return
+    setLaunchRecord(missionControlSession.record)
+    setLaunchScreen('simulation')
   }
 
   const missionControlChat = (
@@ -541,6 +790,38 @@ function App() {
     </>
   )
 
+  if (launchScreen === 'mission-control' && missionControlSession) {
+    return (
+      <Suspense fallback={<div className="grid min-h-screen place-items-center bg-[#03080e] text-sm text-slate-300">Establishing Mission Control…</div>}>
+        <MissionControlPage
+          key={missionControlSession.record.attemptId}
+          initialSession={missionControlSession}
+          onSessionChange={updateMissionControlSession}
+          onReturnToOverview={returnToMissionOverview}
+          onRunMissionAssessment={runMissionControlAssessment}
+          persistenceWarning={missionControlWarning}
+        />
+      </Suspense>
+    )
+  }
+
+  if (launchScreen === 'mission-overview' && missionControlSession) {
+    return (
+      <MissionOverview
+        session={missionControlSession}
+        onEnterMissionControl={openMissionControl}
+        onRunAssessment={runMissionControlAssessment}
+        onExit={() => {
+          setLaunchScreen('builder')
+          setEntryScreen('home')
+          if (window.location.hash) {
+            window.history.replaceState({}, '', `${window.location.pathname}${window.location.search}`)
+          }
+        }}
+      />
+    )
+  }
+
   if (entryScreen === 'home') {
     return (
       <>
@@ -548,6 +829,7 @@ function App() {
           onMissionMode={() => setEntryScreen('campaign')}
           onLiveEvents={() => setEntryScreen('events')}
           onFreeplayMode={() => {
+            clearSavedMissionControl()
             setGameMode('freeplay')
             setTestedDesign(null)
             setLaunchRecord(null)
@@ -555,6 +837,15 @@ function App() {
             setEntryScreen('builder')
           }}
         />
+        {missionControlSession && (
+          <button
+            type="button"
+            onClick={openMissionControl}
+            className="fixed right-4 top-4 z-50 border border-cyan-300/35 bg-[#07111d]/95 px-4 py-3 text-[10px] font-bold uppercase tracking-[0.12em] text-cyan-100 shadow-xl transition hover:bg-cyan-300/10"
+          >
+            Resume {missionControlSession.missionTitle}
+          </button>
+        )}
         {missionControlChat}
       </>
     )
@@ -781,9 +1072,7 @@ function App() {
                       onChange={(event) => {
                         const destinationId = event.target.value
                         setSelectedDestinationId(destinationId)
-                        setSelectedPlannerBodyId(
-                          heliocentricBodies.find((body) => body.destinationId === destinationId)?.id ?? 'earth',
-                        )
+                        setSelectedPlannerBodyId(getPlanetaryBodyForDestination(destinationId)?.id ?? 'earth')
                       }}
                       className="w-full rounded-2xl border border-white/10 bg-slate-950/40 px-3 py-3 text-sm text-slate-100 outline-none ring-0 transition focus:border-sky-400/60"
                     >
@@ -835,7 +1124,9 @@ function App() {
             <div className="rounded-[28px] border border-white/8 bg-slate-900/70 p-5 shadow-[0_15px_55px_rgba(15,23,42,0.45)] backdrop-blur-xl">
               <div className="mb-4">
                 <h3 className="text-lg font-medium text-white">Build / Edit</h3>
-                <p className="mt-1 text-xs text-slate-400">Fit modules and see the assembly update live.</p>
+                <p className="mt-1 text-xs text-slate-400">
+                  The spacecraft model shows its original configuration. Add optional modules to customize it.
+                </p>
               </div>
               <div className="mb-4 space-y-2">
                 <div className="flex items-center justify-between rounded-xl border border-white/8 bg-slate-950/30 px-3 py-2.5 text-sm">
@@ -1152,7 +1443,7 @@ function App() {
                 onSelectBody={setSelectedPlannerBodyId}
                 onSetDestination={(destinationId) => {
                   setSelectedDestinationId(destinationId)
-                  const body = heliocentricBodies.find((candidate) => candidate.destinationId === destinationId)
+                  const body = getPlanetaryBodyForDestination(destinationId)
                   if (body) setSelectedPlannerBodyId(body.id)
                   setTestedDesign(null)
                 }}
@@ -1184,6 +1475,7 @@ function App() {
                 onChangeLaunchVehicle={() => setLaunchScreen('selection')}
                 onMissionFailure={() => finishCampaignAttempt(launchRecord)}
                 onStartMissionSimulation={() => setLaunchScreen('simulation')}
+                onEnterMissionControl={enterMissionControl}
               />
             ) : (
               <>
@@ -1274,7 +1566,7 @@ function App() {
               onSelectBody={setSelectedPlannerBodyId}
               onSetDestination={(destinationId) => {
                 setSelectedDestinationId(destinationId)
-                const body = heliocentricBodies.find((candidate) => candidate.destinationId === destinationId)
+                const body = getPlanetaryBodyForDestination(destinationId)
                 if (body) setSelectedPlannerBodyId(body.id)
                 setTestedDesign(null)
               }}
@@ -1617,6 +1909,9 @@ function App() {
                       if (!mission) return
                       setSelectedMissionId(mission.id)
                       setSelectedDestinationId(mission.destinationId)
+                      setSelectedPlannerBodyId(
+                        getPlanetaryBodyForDestination(mission.destinationId)?.id ?? 'earth',
+                      )
                     }}
                     className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/50 px-3 py-3 text-sm text-slate-100 outline-none focus:border-violet-300/60"
                   >

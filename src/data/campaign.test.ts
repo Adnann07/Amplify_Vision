@@ -37,7 +37,7 @@ describe('campaign mission catalogue', () => {
     }
     expect(isCampaignMissionUnlocked(campaignMissions.at(-1)!, [], true)).toBe(true)
     expect(campaignMissions.filter((mission) => isCampaignMissionUnlocked(mission, []))).toHaveLength(1)
-    expect(campaignMissions.filter((mission) => !isCampaignMissionUnlocked(mission, []))).toHaveLength(19)
+    expect(campaignMissions.filter((mission) => !isCampaignMissionUnlocked(mission, []))).toHaveLength(26)
   })
 
   it('filters by category, difficulty, and searchable mission fields without mutating the full catalogue', () => {
@@ -60,6 +60,7 @@ describe('campaign mission catalogue', () => {
       'mars-atmosphere',
       'mars-surface-imager',
       'perseverance-jezero-science',
+      'ingenuity-flight-technology-study',
     ])
     expect(filterCampaignMissions(campaignMissions, {
       category: 'All',
@@ -100,6 +101,37 @@ describe('campaign mission catalogue', () => {
       .toContain('flybys')
     expect(additions.find((mission) => mission.id === 'osiris-bennu-sample-return')?.briefing.objectives.join(' '))
       .toContain('delivered it in 2023')
+  })
+
+  it('connects the new NASA spacecraft to supported, explicitly scoped mission exercises', () => {
+    const integrations = [
+      ['jwst-observatory-design', 'jwst', 'Earth orbit (L2 not supported)'],
+      ['parker-solar-science-study', 'parker-solar-probe', 'Mercury (inner-system proxy)'],
+      ['juno-jupiter-science', 'juno', 'Jupiter'],
+      ['roman-observatory-design', 'roman', 'Earth orbit (L2 not supported)'],
+      ['ingenuity-flight-technology-study', 'ingenuity', 'Mars'],
+      ['landsat8-land-imaging', 'landsat-8', 'Earth orbit'],
+      ['dscovr-climate-monitoring-study', 'dscovr', 'Earth orbit (L1 not supported)'],
+    ] as const
+
+    for (const [missionId, spacecraftId, destination] of integrations) {
+      const mission = campaignMissions.find((candidate) => candidate.id === missionId)
+      expect(mission).toMatchObject({
+        id: missionId,
+        recommendedSpacecraftId: spacecraftId,
+        destination,
+      })
+      expect(getCampaignMissionGoal(mission!).destinationId).toBeTruthy()
+      expect(mission?.briefing.sourceUrl).toMatch(/^https:\/\//)
+      expect(mission?.briefing.objectives.join(' ')).toMatch(/not model|not simulate|proxy/i)
+    }
+
+    const junoMission = campaignMissions.find((mission) => mission.id === 'juno-jupiter-science')
+    expect(getCampaignMissionGoal(junoMission!).destinationId).toBe('jupiter')
+    expect(campaignMissions.find((mission) => mission.id === 'parker-solar-science-study')?.planningOnly)
+      .toBe(true)
+    expect(campaignMissions.find((mission) => mission.id === 'dscovr-climate-monitoring-study')?.planningOnly)
+      .toBe(true)
   })
 
   it('resolves each unlocked selection to its own briefing and mission requirements', () => {

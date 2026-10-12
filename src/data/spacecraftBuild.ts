@@ -87,7 +87,7 @@ export const instrumentOptions: Record<
 
 export function createInitialBuild(): SpacecraftBuild {
   return {
-    components: ['solarPanel', 'antenna', 'engine', 'instrument'],
+    components: [],
     solarPanelSize: 'medium',
     antennaType: 'highGain',
     engineType: 'chemical',

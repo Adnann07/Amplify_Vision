@@ -3,12 +3,14 @@ import tailwindcss from '@tailwindcss/vite'
 import { defineConfig, type Plugin } from 'vite'
 import { createSpaceWeatherHandler, createSpaceWeatherService } from './server/space-weather.mjs'
 import { createMissionControlHandler } from './server/mission-control.mjs'
+import { createObservationImageryHandler } from './server/observation-imagery.mjs'
 import { createRealTimeEventsHandler, createRealTimeEventsService } from './server/real-time-events.mjs'
 
 const spaceWeatherService = createSpaceWeatherService()
 const missionControlHandler = createMissionControlHandler({
   getSpaceWeatherSummary: (options?: { force?: boolean }) => spaceWeatherService.getSummary(options),
 })
+const observationImageryHandler = createObservationImageryHandler()
 const spaceWeatherHandler = createSpaceWeatherHandler({ service: spaceWeatherService })
 const realTimeEventsHandler = createRealTimeEventsHandler({
   service: createRealTimeEventsService({ spaceWeatherService }),
@@ -59,8 +61,23 @@ function realTimeEventsApi(): Plugin {
   }
 }
 
+function observationImageryApi(): Plugin {
+  return {
+    name: 'observation-imagery-api',
+    configureServer(server) {
+      server.middlewares.use((request, response, next) => {
+        if (!new URL(request.url ?? '/', 'http://vite.local').pathname.startsWith('/api/observations/')) {
+          next()
+          return
+        }
+        void observationImageryHandler(request, response)
+      })
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss(), missionControlApi(), spaceWeatherApi(), realTimeEventsApi()],
+  plugins: [react(), tailwindcss(), missionControlApi(), spaceWeatherApi(), realTimeEventsApi(), observationImageryApi()],
   server: {
     proxy: {
       '/api/horizons': {

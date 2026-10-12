@@ -5,6 +5,7 @@ import { extname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createSpaceWeatherHandler, createSpaceWeatherService } from './space-weather.mjs'
 import { createMissionControlHandler } from './mission-control.mjs'
+import { createObservationImageryHandler } from './observation-imagery.mjs'
 import { createRealTimeEventsHandler, createRealTimeEventsService } from './real-time-events.mjs'
 
 const projectRoot = resolve(fileURLToPath(new URL('..', import.meta.url)))
@@ -14,6 +15,7 @@ const spaceWeatherService = createSpaceWeatherService()
 const missionControlHandler = createMissionControlHandler({
   getSpaceWeatherSummary: (options) => spaceWeatherService.getSummary(options),
 })
+const observationImageryHandler = createObservationImageryHandler()
 const spaceWeatherHandler = createSpaceWeatherHandler({ service: spaceWeatherService })
 const realTimeEventsHandler = createRealTimeEventsHandler({
   service: createRealTimeEventsService({ spaceWeatherService }),
@@ -47,6 +49,10 @@ const server = createServer(async (request, response) => {
   }
   if (url.pathname.startsWith('/api/real-time-events')) {
     await realTimeEventsHandler(request, response)
+    return
+  }
+  if (url.pathname.startsWith('/api/observations/')) {
+    await observationImageryHandler(request, response)
     return
   }
   if (url.pathname === '/api/horizons') {

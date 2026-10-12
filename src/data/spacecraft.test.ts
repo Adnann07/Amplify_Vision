@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { heliocentricBodies } from './planetaryData'
 import { launchVehicles } from './launchVehicles'
 import { availableSpacecraftCatalog, filterSpacecraft, spacecraftCatalog } from './spacecraft'
 
@@ -9,10 +10,17 @@ const newSpacecraftIds = [
   'psyche',
   'lucy',
   'landsat-9',
+  'jwst',
+  'parker-solar-probe',
+  'juno',
+  'roman',
+  'ingenuity',
+  'landsat-8',
+  'dscovr',
 ]
 
 describe('spacecraft preset catalogue', () => {
-  it('preserves the original spacecraft IDs and adds all six requested presets', () => {
+  it('preserves original spacecraft IDs and includes each verified model preset', () => {
     expect(spacecraftCatalog.slice(0, 5).map((spacecraft) => spacecraft.id)).toEqual([
       'voyager',
       'cassini',
@@ -37,13 +45,37 @@ describe('spacecraft preset catalogue', () => {
       'iss',
       'perseverance',
       'osiris-rex',
+      'jwst',
+      'parker-solar-probe',
+      'juno',
+      'roman',
+      'ingenuity',
+      'landsat-8',
+      'dscovr',
     ])
+  })
+
+  it('keeps SLS separate from spacecraft and exposes Jupiter as a planner destination', () => {
+    expect(launchVehicles.find((vehicle) => vehicle.id === 'heavy-launcher')?.name).toBe('NASA SLS Block 1')
+    expect(spacecraftCatalog.some((craft) => craft.id === 'sls-block-1')).toBe(false)
+    expect(heliocentricBodies.find((body) => body.id === 'jupiter')?.destinationId).toBe('jupiter')
+    expect(spacecraftCatalog.find((craft) => craft.id === 'juno')?.destination).toBe('Jupiter')
+    expect(spacecraftCatalog.find((craft) => craft.id === 'jwst')?.missionCategory).toBe('Space observatories')
+    expect(spacecraftCatalog.find((craft) => craft.id === 'parker-solar-probe')?.missionCategory)
+      .toBe('Deep-space probes')
+    expect(spacecraftCatalog.find((craft) => craft.id === 'juno')?.missionCategory).toBe('Planetary science')
+    expect(spacecraftCatalog.find((craft) => craft.id === 'roman')?.missionCategory).toBe('Space observatories')
+    expect(spacecraftCatalog.find((craft) => craft.id === 'ingenuity')?.missionCategory)
+      .toBe('Planetary aerial vehicles')
+    expect(spacecraftCatalog.find((craft) => craft.id === 'landsat-8')?.missionCategory).toBe('Earth observation')
+    expect(spacecraftCatalog.find((craft) => craft.id === 'dscovr')?.missionCategory)
+      .toBe('Space weather monitoring')
   })
 
   it('filters spacecraft by category and searchable metadata without mutating the catalog', () => {
     const ids = spacecraftCatalog.map((craft) => craft.id)
     expect(filterSpacecraft(spacecraftCatalog, 'Earth observation', '').map((craft) => craft.id))
-      .toEqual(['landsat-9'])
+      .toEqual(['landsat-9', 'landsat-8'])
     expect(filterSpacecraft(spacecraftCatalog, 'All', '  jezero ').map((craft) => craft.id))
       .toEqual(['perseverance'])
     expect(filterSpacecraft(spacecraftCatalog, 'All', '').map((craft) => craft.id)).toEqual(ids)
@@ -80,5 +112,19 @@ describe('spacecraft preset catalogue', () => {
       .toMatchObject({ format: 'glb', modelPath: '/models/perseverance/Mars2020PerseveranceRover.glb' })
     expect(spacecraftCatalog.find((craft) => craft.id === 'osiris-rex')?.model)
       .toMatchObject({ format: 'glb', modelPath: '/models/osiris-rex/OSIRIS-REx.glb' })
+    expect(spacecraftCatalog.find((craft) => craft.id === 'jwst')?.model)
+      .toMatchObject({ format: 'glb', modelPath: '/models/jwst/JamesWebbSpaceTelescopeB.glb' })
+    expect(spacecraftCatalog.find((craft) => craft.id === 'parker-solar-probe')?.model)
+      .toMatchObject({ format: 'glb', modelPath: '/models/parker-solar-probe/ParkerSolarProbe.glb' })
+    expect(spacecraftCatalog.find((craft) => craft.id === 'juno')?.model)
+      .toMatchObject({ format: 'glb', modelPath: '/models/juno/JunoB.glb' })
+    expect(spacecraftCatalog.find((craft) => craft.id === 'roman')?.model)
+      .toMatchObject({ format: 'glb', modelPath: '/models/roman/RomanSpaceTelescopeB.glb' })
+    expect(spacecraftCatalog.find((craft) => craft.id === 'ingenuity')?.model)
+      .toMatchObject({ format: 'glb', modelPath: '/models/ingenuity/IngenuityMarsHelicopter.glb' })
+    expect(spacecraftCatalog.find((craft) => craft.id === 'landsat-8')?.model)
+      .toMatchObject({ format: 'glb', modelPath: '/models/landsat-8/Landsat8.glb' })
+    expect(spacecraftCatalog.find((craft) => craft.id === 'dscovr')?.model)
+      .toMatchObject({ format: 'glb', modelPath: '/models/dscovr/DSCOVR.glb' })
   })
 })

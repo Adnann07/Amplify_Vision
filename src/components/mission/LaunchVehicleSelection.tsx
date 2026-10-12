@@ -34,6 +34,7 @@ interface LaunchResultsProps {
   onChangeLaunchVehicle: () => void
   onMissionFailure: () => void
   onStartMissionSimulation: () => void
+  onEnterMissionControl: () => void
 }
 
 function formatCurrency(value: number) {
@@ -183,10 +184,10 @@ export function LaunchVehicleSelection({
           })}
         </div>
         <p className="mt-4 text-center text-[10px] leading-relaxed text-slate-500">
-          Heavy launcher model: NASA Space Launch System by NASA/Alex Arredondo.
+          NASA SLS Block 1 model: NASA-3D-Resources contributor asset, loaded from its original STL mesh.
           {' '}
           <a
-            href="https://science.nasa.gov/3d-resources/space-launch-system-sls/"
+            href="https://github.com/nasa/NASA-3D-Resources/tree/master/3D%20Printing/Space%20Launch%20System%20(SLS)%20Block%201"
             target="_blank"
             rel="noreferrer"
             className="text-slate-300 underline decoration-slate-600 underline-offset-2 hover:text-white"
@@ -312,11 +313,13 @@ export function LaunchResults({
   onChangeLaunchVehicle,
   onMissionFailure,
   onStartMissionSimulation,
+  onEnterMissionControl,
 }: LaunchResultsProps) {
-  const [sequenceComplete, setSequenceComplete] = useState(false)
+  const [completedAttemptId, setCompletedAttemptId] = useState<number | null>(null)
+  const sequenceComplete = completedAttemptId === record.attemptId
   const completeSequence = useCallback(() => {
-    setSequenceComplete(true)
-  }, [])
+    setCompletedAttemptId(record.attemptId)
+  }, [record.attemptId])
   const failed = record.outcome === 'failure'
 
   return (
@@ -328,7 +331,7 @@ export function LaunchResults({
         {sequenceComplete
           ? failed
             ? `MISSION FAILED — ${record.failureTitle}`
-            : 'LAUNCH SUCCESSFUL'
+            : 'SPACECRAFT DEPLOYED · LAUNCH SUCCESSFUL'
           : 'Launch sequence in progress'}
       </h2>
       <p className="mt-2 text-sm text-slate-300">
@@ -359,16 +362,16 @@ export function LaunchResults({
             </div>
           }
         >
-          <LaunchSequence record={record} onComplete={completeSequence} />
+          <LaunchSequence key={record.attemptId} record={record} onComplete={completeSequence} />
         </Suspense>
       </div>
       <p className="mt-2 text-center text-[10px] text-slate-500">
-        Heavy launcher: NASA Space Launch System model by NASA/Alex Arredondo, optimized locally to a 1.5 MB GLB.
+        NASA SLS Block 1: NASA-3D-Resources contributor model loaded from its original STL mesh.
         {' '}
         Small and medium launchers use detailed built-in 3D vehicle assemblies.
         {' '}
         <a
-          href="https://science.nasa.gov/3d-resources/space-launch-system-sls/"
+          href="https://github.com/nasa/NASA-3D-Resources/tree/master/3D%20Printing/Space%20Launch%20System%20(SLS)%20Block%201"
           target="_blank"
           rel="noreferrer"
           className="text-slate-300 underline decoration-slate-600 underline-offset-2 hover:text-white"
@@ -495,7 +498,16 @@ export function LaunchResults({
               onClick={onStartMissionSimulation}
               className="mt-5 w-full rounded-xl bg-sky-300 px-4 py-4 text-xs font-bold uppercase tracking-[0.14em] text-slate-950 transition hover:bg-sky-200"
             >
-              Run mission systems simulation
+              Continue to mission systems assessment
+            </button>
+          )}
+          {sequenceComplete && !failed && (
+            <button
+              type="button"
+              onClick={onEnterMissionControl}
+              className="mt-3 w-full border border-cyan-300/35 bg-cyan-300/[0.09] px-4 py-4 text-xs font-bold uppercase tracking-[0.16em] text-cyan-50 transition hover:border-cyan-200/60 hover:bg-cyan-300/[0.15]"
+            >
+              Enter Mission Control · {record.missionName} / {record.spacecraftName}
             </button>
           )}
           {sequenceComplete && failed && record.mode === 'mission' && (

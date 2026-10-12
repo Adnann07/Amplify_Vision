@@ -1,4 +1,4 @@
-import { Canvas, useFrame } from '@react-three/fiber'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import { CanvasTexture, DoubleSide, Group, SRGBColorSpace } from 'three'
 import type { HorizonsPosition } from '../../data/horizonsService'
@@ -8,6 +8,18 @@ interface SolarSystemSceneProps {
   positions: HorizonsPosition[]
   selectedBodyId: string
   onSelectBody: (bodyId: string) => void
+  zoom: number
+}
+
+function CameraZoom({ zoom }: { zoom: number }) {
+  const { camera } = useThree()
+
+  useEffect(() => {
+    camera.position.set(0, 0, 22 / zoom)
+    camera.updateProjectionMatrix()
+  }, [camera, zoom])
+
+  return null
 }
 
 function makeSurfaceTexture(bodyId: string, baseColor: string) {
@@ -242,6 +254,7 @@ export function SolarSystemScene(props: SolarSystemSceneProps) {
       dpr={[1, 1.5]}
       gl={{ antialias: true, powerPreference: 'low-power', alpha: false }}
     >
+      <CameraZoom zoom={props.zoom} />
       <SolarSystem {...props} />
     </Canvas>
   )

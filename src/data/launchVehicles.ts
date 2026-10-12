@@ -2,6 +2,14 @@ import type { MissionRequirementResult } from './missionGoals'
 import type { InstrumentType } from './spacecraftBuild'
 import type { HorizonsPosition } from './horizonsService'
 import type { PreliminaryTransferEstimate } from './missionPlanner'
+import type { SpacecraftModel } from './spacecraft'
+import type { SpacecraftBuild } from './spacecraftBuild'
+
+export interface LaunchVehicleModel {
+  format: 'stl'
+  modelPath: string
+  sourceUrl: string
+}
 
 export interface LaunchVehicleSpec {
   id: string
@@ -10,6 +18,7 @@ export interface LaunchVehicleSpec {
   payloadCapacityKg: number
   launchCostMillions: number
   accent: string
+  model?: LaunchVehicleModel
 }
 
 export const launchVehicles: LaunchVehicleSpec[] = [
@@ -31,11 +40,17 @@ export const launchVehicles: LaunchVehicleSpec[] = [
   },
   {
     id: 'heavy-launcher',
-    name: 'Heavy Launcher',
+    name: 'NASA SLS Block 1',
     visualClass: 'heavy',
     payloadCapacityKg: 15000,
     launchCostMillions: 180,
     accent: '#34d399',
+    model: {
+      format: 'stl',
+      modelPath: '/models/nasa-sls-block1/SLSBlock1.stl',
+      sourceUrl:
+        'https://github.com/nasa/NASA-3D-Resources/tree/master/3D%20Printing/Space%20Launch%20System%20(SLS)%20Block%201',
+    },
   },
 ]
 
@@ -51,6 +66,10 @@ export interface LaunchRecord {
     transferEstimate: PreliminaryTransferEstimate | null
   }
   spacecraftName: string
+  spacecraftId?: string
+  spacecraftType: string
+  spacecraftModel: SpacecraftModel
+  spacecraftBuild?: SpacecraftBuild
   spacecraftMassKg: number
   existingMissionCostMillions: number
   launchVehicle: LaunchVehicleSpec

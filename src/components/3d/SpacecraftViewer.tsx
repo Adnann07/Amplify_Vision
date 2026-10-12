@@ -191,10 +191,6 @@ async function loadSpacecraftModel(spacecraft: SpacecraftSpec): Promise<LoadedMo
     root.traverse((object) => {
       if (object instanceof Mesh) {
         object.userData.component = componentForPath(object.name)
-        const materials = Array.isArray(object.material) ? object.material : [object.material]
-        materials.forEach((material) => {
-          if (material.name.toLowerCase().includes('solarpanel')) material.visible = false
-        })
       }
     })
     return { root, dispose: () => disposeObject(root) }
@@ -290,10 +286,7 @@ function AssemblyComponents({
     model.root.traverse((object) => {
       const component = object.userData.component as BuildComponentId | undefined
       if (!component) return
-      object.visible =
-        component !== 'antenna' &&
-        component !== 'solarPanel' &&
-        build.components.includes(component)
+      object.visible = true
 
       if (!object.userData.assembledPosition) {
         object.userData.assembledPosition = object.position.clone()
@@ -314,7 +307,7 @@ function AssemblyComponents({
       direction.normalize().multiplyScalar((radius * 0.65) / spacecraft.model.scale)
       object.position.add(direction)
     })
-  }, [build.components, disassembled, model, radius, spacecraft.model])
+  }, [disassembled, model, radius, spacecraft.model])
 
   const panel = solarPanelOptions[build.solarPanelSize]
   const antenna = antennaOptions[build.antennaType]

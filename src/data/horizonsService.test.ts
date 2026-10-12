@@ -63,6 +63,11 @@ describe('Horizons request validation and parsing', () => {
     expect(() => buildHorizonsRequestUrl('not-a-target', DATE)).toThrow(/Unsupported/)
   })
 
+  it('uses the Jupiter planetary center as a direct planner destination', () => {
+    const jupiter = parseHorizonsVectorResponse(vectorResponse(5.2, 0.1), 'jupiter', DATE)
+    expect(jupiter).toMatchObject({ bodyId: 'jupiter', targetId: '599' })
+  })
+
   it('parses the timestamp separately from the six numeric state-vector fields', () => {
     const parsed = parseHorizonsVectorResponse(vectorResponse(1, 0.5, 0.25, -0.01, 0.02, 0), 'earth', DATE)
     expect(parsed).toMatchObject({

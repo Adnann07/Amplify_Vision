@@ -4,13 +4,15 @@ import { Component, Suspense, useCallback, useEffect, useMemo, useRef, useState 
 import type { ErrorInfo, ReactNode } from 'react'
 import { Color, DoubleSide, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, Object3D, PCFShadowMap, PointLight, SphereGeometry, Vector3 } from 'three'
 import type { LaunchRecord } from '../../data/launchVehicles'
+import { LAUNCH_SEQUENCE_DURATION, sequenceElapsedAt, sequencePhaseAt, type SequencePhase } from './launchSequenceState'
 import { NasaSlsRocket, ProceduralRocket } from './LaunchVehicleModels'
-
-type SequencePhase = 'loading' | 'countdown3' | 'countdown2' | 'countdown1' | 'ignition' | 'ascent' | 'anomaly' | 'orbit' | 'complete'
+import { SpacecraftPayloadModel } from './SpacecraftPayloadModel'
 
 const LIFTOFF_TIME = 4.1
 const FAILURE_TIME = 6.35
-const COMPLETE_TIME = 11.2
+const FAIRING_SEPARATION_TIME = 7
+const SPACECRAFT_DEPLOYMENT_TIME = 8.1
+const COMPLETE_TIME = LAUNCH_SEQUENCE_DURATION
 
 function AssetFailureBoundary({
   children,
@@ -39,7 +41,7 @@ class LaunchAssetBoundary extends Component<LaunchAssetBoundaryProps, LaunchAsse
   }
 
   componentDidCatch(error: Error, _info: ErrorInfo) {
-    console.error('NASA SLS model could not be loaded; using the built-in vehicle model.', error)
+    console.error('NASA SLS Block 1 STL could not be loaded; using the built-in generic heavy-vehicle model.', error)
   }
 
   render() {
@@ -302,7 +304,12 @@ function EngineExhaust({
   const light = useRef<PointLight>(null)
   useFrame(() => {
     const elapsed = startedAt === null ? 0 : Math.max(0, performance.now() / 1000 - startedAt)
-    const activePhase = phase === 'ignition' || phase === 'ascent' || phase === 'anomaly' || phase === 'orbit'
+    const activePhase =
+      phase === 'ignition' ||
+      phase === 'ascent' ||
+      phase === 'stage_separation' ||
+      phase === 'fairing_separation' ||
+      phase === 'anomaly'
     const ramp = Math.min(1, Math.max(0, (elapsed - 2.35) / 1.55))
     const failureCutoff = failed ? Math.max(0, 1 - Math.max(0, elapsed - FAILURE_TIME) / 0.55) : 1
     const strength = activePhase ? ramp * failureCutoff : 0
@@ -497,6 +504,15 @@ function isLaunchFailureCause(record: LaunchRecord) {
   return record.failureParameter === 'Spacecraft mass' ? 'overload' : 'reliability'
 }
 
+function clamp01(value: number) {
+  return Math.max(0, Math.min(1, value))
+}
+
+function isSurfacePayload(record: LaunchRecord) {
+  const type = record.spacecraftType.toLowerCase()
+  return type.includes('rover') || type.includes('helicopter') || type.includes('lander')
+}
+
 function LaunchWorld({
   record,
   startedAt,
@@ -509,24 +525,37 @@ function LaunchWorld({
   onAssetReady: () => void
 }) {
   const rocketRoot = useRef<Group>(null)
+  const attachedPayload = useRef<Group>(null)
+  const deployedPayload = useRef<Group>(null)
+  const readyParts = useRef(new Set<string>())
   const { camera } = useThree()
   const position = useMemo(() => new Vector3(), [])
   const target = useMemo(() => new Vector3(), [])
   const launchFailed = record.outcome === 'failure'
   const failureCause = isLaunchFailureCause(record)
-  const heavy = record.launchVehicle.id === 'heavy-launcher'
+  const variant = record.launchVehicle.id === 'small-launcher'
+    ? 'small'
+    : record.launchVehicle.visualClass === 'heavy'
+      ? 'heavy'
+      : 'medium'
+  const markReady = useCallback((part: 'vehicle' | 'payload') => {
+    readyParts.current.add(part)
+    if (readyParts.current.has('vehicle') && readyParts.current.has('payload')) onAssetReady()
+  }, [onAssetReady])
+  const markVehicleReady = useCallback(() => markReady('vehicle'), [markReady])
+  const markPayloadReady = useCallback(() => markReady('payload'), [markReady])
 
   useFrame((_, delta) => {
     const elapsed = startedAt === null ? 0 : Math.max(0, performance.now() / 1000 - startedAt)
     const root = rocketRoot.current
     if (!root) return
 
-    const liftoffProgress = Math.max(0, Math.min(1, (elapsed - LIFTOFF_TIME) / 6.1))
+    const liftoffProgress = clamp01((elapsed - LIFTOFF_TIME) / (COMPLETE_TIME - LIFTOFF_TIME))
     root.visible = true
     if (!launchFailed) {
-      root.position.y = liftoffProgress * liftoffProgress * 255
-      root.scale.setScalar(1 - liftoffProgress * 0.67)
-      root.rotation.z = 0
+      root.position.y = Math.pow(liftoffProgress, 1.45) * 350
+      root.scale.setScalar(1 - liftoffProgress * 0.46)
+      root.rotation.z = Math.sin(elapsed * 0.45) * 0.012
     } else if (elapsed < FAILURE_TIME) {
       root.position.y = Math.max(0, (elapsed - LIFTOFF_TIME) * 7.2)
       root.scale.setScalar(1)
@@ -538,24 +567,49 @@ function LaunchWorld({
       root.visible = blastElapsed < 0.2
     }
 
-    const shakeStrength = elapsed >= 2.35 && elapsed < FAILURE_TIME && (!launchFailed || elapsed < FAILURE_TIME)
+    const attached = attachedPayload.current
+    if (attached) {
+      attached.visible =
+        !launchFailed && elapsed >= FAIRING_SEPARATION_TIME + 0.18 && elapsed < SPACECRAFT_DEPLOYMENT_TIME
+    }
+    const payload = deployedPayload.current
+    if (payload) {
+      payload.visible = !launchFailed && elapsed >= SPACECRAFT_DEPLOYMENT_TIME
+      if (payload.visible) {
+        const separation = clamp01((elapsed - SPACECRAFT_DEPLOYMENT_TIME) / 2.2)
+        const elapsedSinceDeploy = Math.max(0, elapsed - SPACECRAFT_DEPLOYMENT_TIME)
+        payload.position.set(
+          separation * 24 + (record.destination.toLowerCase().includes('earth') ? Math.sin(elapsedSinceDeploy * 0.35) * 5 : 0),
+          root.position.y + 88 * root.scale.y + separation * (record.destination.toLowerCase().includes('earth') ? 4 : 15),
+          0,
+        )
+        payload.rotation.z = Math.sin(elapsedSinceDeploy * 0.45) * 0.035
+      }
+    }
+
+    const shakeStrength = elapsed >= 2.35 && elapsed < FAILURE_TIME
       ? 0.22 * Math.min(1, (elapsed - 2.35) / 1.4)
       : 0
-    const followY = launchFailed ? 0 : Math.max(0, root.position.y)
+    const followY = launchFailed ? 0 : Math.max(0, root.position.y + (payload?.visible ? 70 : 0))
     const orbitProgress = launchFailed ? 0 : liftoffProgress
     position.set(
-      112 - orbitProgress * 60 + Math.sin(elapsed * 28) * shakeStrength,
-      84 + followY + orbitProgress * 10 + Math.cos(elapsed * 24) * shakeStrength,
-      175 - orbitProgress * 60,
+      112 - orbitProgress * 76 + Math.sin(elapsed * 28) * shakeStrength,
+      84 + followY + orbitProgress * 14 + Math.cos(elapsed * 24) * shakeStrength,
+      175 - orbitProgress * 78,
     )
     camera.position.lerp(position, 1 - Math.exp(-delta * (elapsed > 3.8 ? 2.4 : 3.5)))
-    target.set(0, 42 + followY * 0.9, 0)
+    target.set(payload?.visible ? payload.position.x : 0, (payload?.visible ? payload.position.y : root.position.y + 42) + 24, 0)
     camera.lookAt(target)
-
   })
 
-  const smokeActive = phase === 'ignition' || phase === 'ascent' || phase === 'anomaly' || phase === 'orbit' || phase === 'complete'
-  const highAltitude = !launchFailed && (phase === 'orbit' || phase === 'complete')
+  const smokeActive = phase === 'ignition' || phase === 'ascent' || phase === 'stage_separation' || phase === 'anomaly'
+  const highAltitude = !launchFailed && (
+    phase === 'spacecraft_deployment' ||
+    phase === 'spacecraft_initialization' ||
+    phase === 'mission_active' ||
+    phase === 'complete'
+  )
+  const rocketModel = record.launchVehicle.model
 
   return (
     <>
@@ -579,19 +633,41 @@ function LaunchWorld({
       <ServiceTower />
       <DistantTerrain />
       <SkyClouds />
-      <OrbitPlanet visible={!launchFailed && (phase === 'orbit' || phase === 'complete')} />
+      <OrbitPlanet visible={!launchFailed && highAltitude && record.destination.toLowerCase().includes('earth')} />
 
       <group ref={rocketRoot}>
-        {heavy ? (
-          <AssetFailureBoundary fallback={<ProceduralRocket variant="heavy" onReady={onAssetReady} />}>
+        {rocketModel?.format === 'stl' ? (
+          <AssetFailureBoundary fallback={<ProceduralRocket variant={variant} startedAt={launchFailed ? null : startedAt} onReady={markVehicleReady} />}>
             <Suspense fallback={null}>
-              <NasaSlsRocket onReady={onAssetReady} />
+              <NasaSlsRocket
+                modelPath={rocketModel.modelPath}
+                onReady={markVehicleReady}
+              />
             </Suspense>
           </AssetFailureBoundary>
         ) : (
-          <ProceduralRocket variant={record.launchVehicle.id === 'small-launcher' ? 'small' : 'medium'} onReady={onAssetReady} />
+          <ProceduralRocket
+            variant={variant}
+            startedAt={launchFailed ? null : startedAt}
+            onReady={markVehicleReady}
+          />
         )}
+        <group ref={attachedPayload} position={[0, 90, 0]} scale={0.78}>
+          <Suspense fallback={null}>
+            <SpacecraftPayloadModel model={record.spacecraftModel} onReady={markPayloadReady} />
+          </Suspense>
+        </group>
         <EngineExhaust startedAt={startedAt} phase={phase} failed={launchFailed} />
+      </group>
+      <group ref={deployedPayload} visible={false}>
+        <Suspense fallback={null}>
+          <SpacecraftPayloadModel model={record.spacecraftModel} onReady={markPayloadReady} />
+        </Suspense>
+        <mesh position={[0, 0, 4.8]}>
+          <sphereGeometry args={[0.34, 12, 10]} />
+          <meshBasicMaterial color="#55e7ff" toneMapped={false} />
+        </mesh>
+        <pointLight position={[0, 1, 0]} color="#55e7ff" intensity={5} distance={24} />
       </group>
       {launchFailed && startedAt !== null && <FailureExplosion startedAt={startedAt} cause={failureCause} />}
       <group position={[0, 0, 0]}>
@@ -667,9 +743,13 @@ function phaseLabel(phase: SequencePhase, failed: boolean) {
     countdown1: '1',
     ignition: 'IGNITION',
     ascent: failed ? 'ASCENT ANOMALY' : 'LIFTOFF',
-    anomaly: failed ? 'MISSION FAILED' : 'ENGINE SHUTDOWN',
-    orbit: 'HIGH-ALTITUDE VIEW',
-    complete: failed ? 'LAUNCH FAILED' : 'LAUNCH SUCCESSFUL',
+    stage_separation: 'STAGE SEPARATION',
+    fairing_separation: 'PAYLOAD FAIRING SEPARATION',
+    spacecraft_deployment: 'SPACECRAFT DEPLOYMENT',
+    spacecraft_initialization: 'SPACECRAFT INITIALIZATION',
+    mission_active: 'MISSION OPERATIONS STARTED',
+    anomaly: failed ? 'LAUNCH ABORTED' : 'ASCENT ANOMALY',
+    complete: failed ? 'LAUNCH FAILED' : 'SPACECRAFT DEPLOYED',
   }
   return labels[phase]
 }
@@ -678,6 +758,7 @@ export function LaunchSequence({ record, onComplete }: { record: LaunchRecord; o
   const [phase, setPhase] = useState<SequencePhase>('loading')
   const [startedAt, setStartedAt] = useState<number | null>(null)
   const [muted, setMuted] = useState(true)
+  const completionSent = useRef(false)
   const { progress } = useProgress()
   const failed = record.outcome === 'failure'
   const onAssetReady = useCallback(() => {
@@ -686,18 +767,24 @@ export function LaunchSequence({ record, onComplete }: { record: LaunchRecord; o
 
   useEffect(() => {
     if (startedAt === null) return
-    const timers = [
-      window.setTimeout(() => setPhase('countdown2'), 850),
-      window.setTimeout(() => setPhase('countdown1'), 1700),
-      window.setTimeout(() => setPhase('ignition'), 2550),
-      window.setTimeout(() => setPhase('ascent'), LIFTOFF_TIME * 1000),
-      window.setTimeout(() => setPhase(failed ? 'anomaly' : 'orbit'), (failed ? 6800 : 9000)),
-      window.setTimeout(() => {
-        setPhase('complete')
-        onComplete()
-      }, COMPLETE_TIME * 1000),
-    ]
-    return () => timers.forEach(window.clearTimeout)
+    const startedAtSeconds = startedAt
+    const interval = window.setInterval(() => {
+      const elapsed = Math.max(0, performance.now() / 1000 - startedAtSeconds)
+      const nextPhase = sequencePhaseAt(elapsed, failed)
+      setPhase((currentPhase) => {
+        const currentAt = sequenceElapsedAt(currentPhase, failed)
+        const nextAt = sequenceElapsedAt(nextPhase, failed)
+        return nextAt < currentAt ? currentPhase : nextPhase
+      })
+      if (nextPhase === 'complete') {
+        window.clearInterval(interval)
+        if (!completionSent.current) {
+          completionSent.current = true
+          onComplete()
+        }
+      }
+    }, 80)
+    return () => window.clearInterval(interval)
   }, [failed, onComplete, startedAt])
 
   return (
@@ -709,7 +796,8 @@ export function LaunchSequence({ record, onComplete }: { record: LaunchRecord; o
       aria-label={`${record.launchVehicle.name} real-time 3D launch sequence: ${phaseLabel(phase, failed)}`}
     >
       <Canvas
-        camera={{ position: [112, 84, 175], fov: 38, near: 0.1, far: 800 }}
+        frameloop={phase === 'complete' ? 'demand' : 'always'}
+        camera={{ position: [112, 84, 175], fov: 38, near: 0.1, far: 1000 }}
         dpr={[1, 1.35]}
         gl={{ antialias: false, powerPreference: 'high-performance', alpha: false }}
         onCreated={({ gl }) => {
@@ -730,9 +818,14 @@ export function LaunchSequence({ record, onComplete }: { record: LaunchRecord; o
           className={`mt-2 text-3xl font-black tracking-[0.18em] drop-shadow-[0_3px_12px_rgba(0,0,0,0.75)] sm:text-4xl ${
             phase === 'anomaly' ? 'text-rose-100' : phase === 'ignition' ? 'text-amber-100' : 'text-white'
           }`}
-        >
-          {phaseLabel(phase, failed)}
-        </p>
+          >
+            {phaseLabel(phase, failed)}
+          </p>
+          {phase !== 'loading' && phase !== 'complete' && (
+            <p className="mt-2 text-[10px] font-medium tracking-[0.08em] text-slate-100/75">
+              {record.spacecraftName} · {record.missionName} · {record.destination}
+            </p>
+          )}
       </div>
 
       {phase === 'loading' && (
@@ -746,7 +839,9 @@ export function LaunchSequence({ record, onComplete }: { record: LaunchRecord; o
 
       <div className="absolute left-4 top-4 z-10 flex items-center gap-2 rounded-full border border-white/15 bg-slate-950/65 px-3 py-1.5 text-[9px] font-semibold uppercase tracking-[0.18em] text-slate-100 backdrop-blur">
         <span className={`h-1.5 w-1.5 rounded-full ${phase === 'complete' ? (failed ? 'bg-rose-300' : 'bg-emerald-300') : 'bg-sky-300 animate-pulse'}`} />
-        {phase === 'complete' ? 'Flight record complete' : 'Live flight simulation'}
+        {phase === 'complete'
+          ? failed ? 'Ascent aborted' : 'Deployment complete · mission assessment pending'
+          : 'Live flight simulation'}
       </div>
 
       <button
@@ -762,7 +857,40 @@ export function LaunchSequence({ record, onComplete }: { record: LaunchRecord; o
         <div className={`absolute bottom-4 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded-full border px-5 py-2 text-xs font-black tracking-[0.2em] shadow-xl backdrop-blur ${
           failed ? 'border-rose-200/50 bg-rose-950/90 text-rose-100' : 'border-emerald-200/50 bg-emerald-950/90 text-emerald-100'
         }`}>
-          {phaseLabel(phase, failed)}
+          {failed ? 'LAUNCH FAILED' : 'SPACECRAFT DEPLOYED'}
+        </div>
+      )}
+
+      {!failed && phase !== 'loading' && (
+        <div className="absolute bottom-4 left-4 z-10 max-w-[75%] rounded-lg border border-white/10 bg-slate-950/75 px-3 py-2 text-[10px] leading-relaxed text-slate-100 backdrop-blur">
+          {phase === 'stage_separation' && (
+            record.launchVehicle.model?.format === 'stl'
+              ? 'Stage event shown as a simplified cue; the selected launch vehicle is a single, indivisible STL mesh.'
+              : 'Procedural lower stage and configured boosters separate from the continuing upper vehicle.'
+          )}
+          {phase === 'fairing_separation' && (
+            record.launchVehicle.model?.format === 'stl'
+              ? 'Simplified fairing event cue; the source vehicle mesh is preserved and not split.'
+              : 'Procedural fairing halves move away to reveal the selected spacecraft.'
+          )}
+          {phase === 'spacecraft_deployment' && (
+            isSurfacePayload(record)
+              ? 'Selected surface vehicle separates for display; entry, descent, and landing are not simulated.'
+              : 'Selected spacecraft separates and begins independent, simulated motion.'
+          )}
+          {phase === 'spacecraft_initialization' && (
+            isSurfacePayload(record)
+              ? 'Surface payload deployed for demonstration · simulated communications link establishing.'
+              : 'Spacecraft deployed · simulated communications link establishing.'
+          )}
+          {phase === 'mission_active' && (
+            isSurfacePayload(record)
+              ? 'Surface mission destination selected · landing and surface operations are not simulated.'
+              : record.destination.toLowerCase().includes('earth')
+                ? 'Initial Earth-orbit segment simulated · mission objectives still require assessment.'
+                : `Simplified outbound trajectory toward ${record.destination} · no detailed transfer is simulated.`
+          )}
+          {phase === 'complete' && 'Launch and deployment completed. Overall mission success has not been assessed.'}
         </div>
       )}
 
