@@ -41,7 +41,7 @@ export const missionGoals: MissionGoal[] = [
     destination: 'Moon',
     destinationId: 'moon',
     description: 'Survey lunar terrain with a compact orbital platform.',
-    requirements: { power: 500, deltaV: 2, communication: 60, instruments: 2, maxBudget: 2200 },
+    requirements: { power: 500, deltaV: 2, communication: 60, instruments: 2, maxBudget: 3000 },
   },
   {
     id: 'earth-observation',

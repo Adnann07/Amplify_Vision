@@ -3,6 +3,7 @@ import { Canvas } from '@react-three/fiber'
 import { Component, Suspense, useState, type ReactNode } from 'react'
 import type { MissionBriefing } from '../../data/missionBriefing'
 import type { MissionGoal } from '../../data/missionGoals'
+import { NasaMissionImagery } from './NasaMissionImagery'
 
 interface MissionDirectorProps {
   briefing: MissionBriefing
@@ -258,6 +259,7 @@ export function MissionDirector({
                   </li>
                 ))}
               </ul>
+              <NasaMissionImagery query={briefing.nasaImageQuery} />
             </section>
 
             <div className="mt-auto pt-6">
@@ -286,6 +288,25 @@ export function MissionDirector({
                 >
                   {briefing.sourceLabel}
                 </a>
+                <span className="mt-1 block">
+                  Mission imagery: <a
+                    href="https://images.nasa.gov/"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-slate-300 underline decoration-slate-500 underline-offset-2 hover:text-white"
+                  >
+                    NASA Images and Video Library
+                  </a>
+                  {' · '}
+                  <a
+                    href="https://images.nasa.gov/docs/images.nasa.gov_api_docs.pdf"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-slate-300 underline decoration-slate-500 underline-offset-2 hover:text-white"
+                  >
+                    API documentation
+                  </a>
+                </span>
               </p>
             </div>
           </div>

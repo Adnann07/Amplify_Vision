@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { Suspense, lazy, useMemo, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
 import {
   antennaOptions,
   buildComponentLabels,
@@ -26,10 +26,28 @@ import { LaunchResults, LaunchVehicleSelection } from './components/mission/Laun
 import { assessLaunchOutcome } from './data/launchOutcome'
 import { HomeScreen, CampaignSelectionScreen } from './components/mission/GameModeSelection'
 import { campaignMissions, getCampaignMissionGoal } from './data/campaign'
+import { evaluateCampaignAttempt, type CampaignEvaluation } from './data/campaignScoring'
+import { loadCampaignProgress, saveCampaignProgress, type CampaignProgress } from './data/campaignProgress'
+import {
+  CampaignMissionSimulation,
+  CampaignPerformanceReport,
+} from './components/mission/CampaignPerformanceReport'
+import { SolarSystemPlanner } from './components/mission/SolarSystemPlanner'
+import { loadSolarSystemPositions, type HorizonsPosition } from './data/horizonsService'
+import { heliocentricBodies } from './data/planetaryData'
+import { estimateHohmannTransfer } from './data/missionPlanner'
 
 type GameMode = 'mission' | 'freeplay'
 type EntryScreen = 'home' | 'campaign' | 'briefing' | 'builder'
 type BriefingOrigin = 'campaign' | 'builder'
+type LaunchScreen = 'builder' | 'selection' | 'results' | 'simulation' | 'report'
+
+interface CampaignState {
+  progress: CampaignProgress
+  storageWarning: string | null
+}
+
+type StoredCampaignEvaluation = CampaignEvaluation & { previousBestScore: number | null }
 
 const SpacecraftViewer = lazy(() =>
   import('./components/3d/SpacecraftViewer').then((module) => ({ default: module.SpacecraftViewer })),
@@ -84,11 +102,21 @@ function App() {
   const [selectedCampaignMissionId, setSelectedCampaignMissionId] = useState(campaignMissions[0].id)
   const [selectedMissionId, setSelectedMissionId] = useState('earth-observation')
   const [testedDesign, setTestedDesign] = useState<string | null>(null)
-  const [launchScreen, setLaunchScreen] = useState<'builder' | 'selection' | 'results'>('builder')
+  const [launchScreen, setLaunchScreen] = useState<LaunchScreen>('builder')
   const [selectedLaunchVehicleId, setSelectedLaunchVehicleId] = useState<string | null>(null)
   const [launchRecord, setLaunchRecord] = useState<LaunchRecord | null>(null)
+  const [campaignEvaluation, setCampaignEvaluation] = useState<StoredCampaignEvaluation | null>(null)
+  const [campaignState, setCampaignState] = useState<CampaignState>(() => {
+    const loaded = loadCampaignProgress()
+    return { progress: loaded.progress, storageWarning: loaded.warning }
+  })
   const [launchAttempt, setLaunchAttempt] = useState(0)
   const [selectedDestinationId, setSelectedDestinationId] = useState(destinations[0].id)
+  const [selectedPlannerBodyId, setSelectedPlannerBodyId] = useState('earth')
+  const [launchDate, setLaunchDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [plannerPositions, setPlannerPositions] = useState<HorizonsPosition[]>([])
+  const [plannerErrors, setPlannerErrors] = useState<string[]>([])
+  const [plannerLoading, setPlannerLoading] = useState(true)
   const [selectedPropulsionId, setSelectedPropulsionId] = useState(propulsionOptions[0].id)
   const [build, setBuild] = useState(createInitialBuild)
   const [sustainabilityChoices, setSustainabilityChoices] = useState<SustainabilityChoices>(
@@ -98,6 +126,30 @@ function App() {
   const [fuel, setFuel] = useState(750)
   const [budget, setBudget] = useState(3)
   const [riskTolerance, setRiskTolerance] = useState(38)
+
+  const campaignProgress = campaignState.progress
+
+  useEffect(() => {
+    if (entryScreen !== 'builder' || launchScreen === 'results') return
+    const controller = new AbortController()
+    void loadSolarSystemPositions(launchDate, controller.signal)
+      .then((result) => {
+        if (controller.signal.aborted) return
+        setPlannerPositions(result.positions)
+        setPlannerErrors(result.errors)
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return
+        setPlannerPositions([])
+        setPlannerErrors([
+          error instanceof Error ? error.message : 'Planetary positions could not be loaded.',
+        ])
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setPlannerLoading(false)
+      })
+    return () => controller.abort()
+  }, [entryScreen, launchDate, launchScreen])
 
   const selectedDestination =
     destinations.find((destination) => destination.id === selectedDestinationId) ?? destinations[0]
@@ -238,7 +290,7 @@ function App() {
         ]
       : [
           `${selectedDestination.environment} route validated`,
-          `${selectedPropulsion.label} transfer window optimized`,
+          `${selectedPropulsion.label} transfer profile selected · ${metrics.transferTime} mo simplified estimate`,
           `${buildStats.communication}% communications link margin`,
           `${payload.toLocaleString()} kg payload balance within thermal envelope`,
           ...(selectedLaunchVehicle
@@ -249,6 +301,13 @@ function App() {
   const availableComponents: BuildComponentId[] = ['solarPanel', 'antenna', 'engine', 'instrument']
   const updateBuild = <Key extends keyof typeof build>(key: Key, value: (typeof build)[Key]) =>
     setBuild((current) => ({ ...current, [key]: value }))
+  const updateLaunchDate = (date: string) => {
+    if (date === launchDate) return
+    setPlannerLoading(true)
+    setPlannerErrors([])
+    setPlannerPositions([])
+    setLaunchDate(date)
+  }
   const updateSustainability = <Key extends keyof SustainabilityChoices>(
     key: Key,
     value: SustainabilityChoices[Key],
@@ -273,6 +332,71 @@ function App() {
     { label: 'Over budget', ok: totalMissionCost <= missionBudgetLimitMillions },
   ]
   const designNeedsReview = warnings.some((warning) => !warning.ok)
+  const startCampaignMission = (missionId: string, screen: 'briefing' | 'builder' = 'briefing') => {
+    const campaignMission = campaignMissions.find((mission) => mission.id === missionId)
+    if (!campaignMission) throw new Error(`Unknown campaign mission "${missionId}".`)
+    const missingPrerequisites = campaignMission.requiresMissionIds.filter(
+      (id) => !campaignProgress.completedMissionIds.includes(id),
+    )
+    if (missingPrerequisites.length > 0) {
+      throw new Error(
+        `Campaign mission "${campaignMission.id}" is locked until these missions are completed: ${missingPrerequisites.join(', ')}.`,
+      )
+    }
+    const missionGoal = getCampaignMissionGoal(campaignMission)
+    setGameMode('mission')
+    setSelectedCampaignMissionId(campaignMission.id)
+    setSelectedMissionId(campaignMission.missionGoalId)
+    setSelectedDestinationId(missionGoal.destinationId)
+    setSelectedPlannerBodyId(
+      heliocentricBodies.find((body) => body.destinationId === missionGoal.destinationId)?.id ?? 'earth',
+    )
+    setSelectedLaunchVehicleId(null)
+    setTestedDesign(null)
+    setBriefingOrigin('campaign')
+    setLaunchRecord(null)
+    setCampaignEvaluation(null)
+    setLaunchScreen('builder')
+    setEntryScreen(screen)
+  }
+  const finishCampaignAttempt = (record: LaunchRecord) => {
+    const evaluation = evaluateCampaignAttempt(selectedCampaignMission, record)
+    const previousBestScore = campaignProgress.bestScores[evaluation.missionId] ?? null
+    setCampaignEvaluation({ ...evaluation, previousBestScore })
+    const previousProgress = campaignProgress
+    const completedMissionIds = evaluation.objectiveAchieved
+      ? [...new Set([...previousProgress.completedMissionIds, evaluation.missionId])]
+      : previousProgress.completedMissionIds
+    const attemptNumber =
+      previousProgress.attempts
+        .filter((attempt) => attempt.missionId === evaluation.missionId)
+        .reduce((highest, attempt) => Math.max(highest, attempt.attemptNumber), 0) + 1
+    const nextProgress: CampaignProgress = {
+      ...previousProgress,
+      completedMissionIds,
+      bestScores: {
+        ...previousProgress.bestScores,
+        [evaluation.missionId]: Math.max(
+          previousProgress.bestScores[evaluation.missionId] ?? 0,
+          evaluation.score,
+        ),
+      },
+      attempts: [
+        ...previousProgress.attempts,
+        {
+          id: `${evaluation.missionId}-${attemptNumber}`,
+          missionId: evaluation.missionId,
+          attemptNumber,
+          score: evaluation.score,
+          status: evaluation.status,
+          objectiveAchieved: evaluation.objectiveAchieved,
+        },
+      ].slice(-100),
+    }
+    const storageWarning = saveCampaignProgress(nextProgress)
+    setCampaignState({ progress: nextProgress, storageWarning })
+    setLaunchScreen('report')
+  }
   const launchMission = (vehicle: LaunchVehicleSpec) => {
     const totalCost = buildStats.missionCost + vehicle.launchCostMillions
     const launchRequirements = evaluateMissionRequirements(missionWithBudgetLimit, {
@@ -280,6 +404,18 @@ function App() {
       missionCost: totalCost,
     })
     const assessment = assessLaunchOutcome(buildStats.mass, buildStats.reliability, vehicle)
+    const ephemerides = plannerPositions.filter((position) => position.requestedDate === launchDate)
+    const destinationBody = heliocentricBodies.find(
+      (body) => body.destinationId === selectedDestinationId,
+    ) ?? null
+    const transferEstimate =
+      destinationBody && destinationBody.id !== 'earth'
+        ? (() => {
+            const earth = ephemerides.find((position) => position.bodyId === 'earth')
+            const target = ephemerides.find((position) => position.bodyId === destinationBody.id)
+            return earth && target ? estimateHohmannTransfer(earth, target) : null
+          })()
+        : null
 
     const attemptId = launchAttempt + 1
     setLaunchAttempt(attemptId)
@@ -289,6 +425,12 @@ function App() {
       mode: gameMode ?? 'mission',
       missionName: gameMode === 'freeplay' ? 'Freeplay Sandbox' : selectedMission.name,
       destination: selectedDestination.label,
+      planningSnapshot: {
+        launchDate,
+        destinationBodyId: destinationBody?.id ?? null,
+        ephemerides,
+        transferEstimate,
+      },
       spacecraftName: selectedSpacecraft.name,
       spacecraftMassKg: buildStats.mass,
       existingMissionCostMillions: buildStats.missionCost,
@@ -296,6 +438,16 @@ function App() {
       totalMissionCostMillions: totalCost,
       missionBudgetMillions: missionBudgetLimitMillions,
       spacecraftReliability: buildStats.reliability,
+      missionTelemetry: {
+        power: buildStats.power,
+        deltaV: buildStats.deltaV,
+        communication: buildStats.communication,
+        instruments: buildStats.instrumentCount,
+        instrumentType: build.instrumentType,
+        science: buildStats.science,
+        resourceEfficiency: buildStats.resourceEfficiency,
+        sustainabilityLevel: buildStats.sustainabilityLevel,
+      },
       missionRequirementResults: launchRequirements,
       ...assessment,
     })
@@ -321,18 +473,58 @@ function App() {
     return (
       <CampaignSelectionScreen
         onBack={() => setEntryScreen('home')}
-        onSelectMission={(missionId) => {
-          const campaignMission = campaignMissions.find((mission) => mission.id === missionId)
-          if (!campaignMission) throw new Error(`Unknown campaign mission "${missionId}".`)
-          const missionGoal = getCampaignMissionGoal(campaignMission)
-          setGameMode('mission')
-          setSelectedCampaignMissionId(campaignMission.id)
-          setSelectedMissionId(campaignMission.missionGoalId)
-          setSelectedDestinationId(missionGoal.destinationId)
-          setBriefingOrigin('campaign')
+        progress={campaignProgress}
+        storageWarning={campaignState.storageWarning}
+        onSelectMission={(missionId) => startCampaignMission(missionId)}
+      />
+    )
+  }
+
+  if (launchScreen === 'simulation' && launchRecord && gameMode === 'mission') {
+    return (
+      <CampaignMissionSimulation
+        mission={selectedCampaignMission}
+        record={launchRecord}
+        onComplete={() => finishCampaignAttempt(launchRecord)}
+      />
+    )
+  }
+
+  if (launchScreen === 'report' && launchRecord && campaignEvaluation) {
+    const nextMission = campaignMissions.find(
+      (mission) =>
+        mission.requiresMissionIds.includes(selectedCampaignMission.id) &&
+        mission.requiresMissionIds.every((id) => campaignProgress.completedMissionIds.includes(id)),
+    ) ?? null
+    return (
+      <CampaignPerformanceReport
+        mission={selectedCampaignMission}
+        record={launchRecord}
+        evaluation={campaignEvaluation}
+        previousBestScore={campaignEvaluation.previousBestScore}
+        attemptHistory={campaignProgress.attempts.filter(
+          (attempt) => attempt.missionId === selectedCampaignMission.id,
+        )}
+        nextMission={nextMission}
+        onContinue={startCampaignMission}
+        onReplay={() => {
           setLaunchRecord(null)
+          setCampaignEvaluation(null)
           setLaunchScreen('builder')
-          setEntryScreen('briefing')
+          setEntryScreen('builder')
+        }}
+        onRetry={() => startCampaignMission(selectedCampaignMission.id)}
+        onReviewDesign={() => {
+          setLaunchRecord(null)
+          setCampaignEvaluation(null)
+          setLaunchScreen('builder')
+          setEntryScreen('builder')
+        }}
+        onMissionSelection={() => {
+          setLaunchRecord(null)
+          setCampaignEvaluation(null)
+          setLaunchScreen('builder')
+          setEntryScreen('campaign')
         }}
       />
     )
@@ -365,7 +557,7 @@ function App() {
         <header className="mb-6 flex flex-col gap-4 border-b border-white/10 pb-5 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="mb-2 text-[10px] font-medium uppercase tracking-[0.35em] text-sky-300/80">
-              {gameMode === 'freeplay' ? 'Freeplay · Open sandbox' : 'Mission Mode · Level 1'}
+              {gameMode === 'freeplay' ? 'Freeplay · Open sandbox' : `Mission Mode · Level ${selectedCampaignMission.level}`}
             </p>
             <h1 className="text-3xl font-semibold tracking-[-0.06em] text-white sm:text-4xl">
               Amplify Vision
@@ -470,7 +662,13 @@ function App() {
                     <select
                       id="destination"
                       value={selectedDestinationId}
-                      onChange={(event) => setSelectedDestinationId(event.target.value)}
+                      onChange={(event) => {
+                        const destinationId = event.target.value
+                        setSelectedDestinationId(destinationId)
+                        setSelectedPlannerBodyId(
+                          heliocentricBodies.find((body) => body.destinationId === destinationId)?.id ?? 'earth',
+                        )
+                      }}
                       className="w-full rounded-2xl border border-white/10 bg-slate-950/40 px-3 py-3 text-sm text-slate-100 outline-none ring-0 transition focus:border-sky-400/60"
                     >
                       {destinations.map((destination) => (
@@ -829,6 +1027,25 @@ function App() {
           </aside>
 
           <section className="space-y-6">
+            {launchScreen === 'selection' && (
+              <SolarSystemPlanner
+                mode={gameMode ?? 'mission'}
+                launchDate={launchDate}
+                onLaunchDateChange={updateLaunchDate}
+                positions={plannerPositions}
+                loading={plannerLoading}
+                errors={plannerErrors}
+                selectedBodyId={selectedPlannerBodyId}
+                selectedDestinationId={selectedDestinationId}
+                onSelectBody={setSelectedPlannerBodyId}
+                onSetDestination={(destinationId) => {
+                  setSelectedDestinationId(destinationId)
+                  const body = heliocentricBodies.find((candidate) => candidate.destinationId === destinationId)
+                  if (body) setSelectedPlannerBodyId(body.id)
+                  setTestedDesign(null)
+                }}
+              />
+            )}
             {launchScreen === 'selection' ? (
               <LaunchVehicleSelection
                 mode={gameMode ?? 'mission'}
@@ -853,6 +1070,8 @@ function App() {
                 onRetry={launchMission}
                 onReturnToBuilder={() => setLaunchScreen('builder')}
                 onChangeLaunchVehicle={() => setLaunchScreen('selection')}
+                onMissionFailure={() => finishCampaignAttempt(launchRecord)}
+                onStartMissionSimulation={() => setLaunchScreen('simulation')}
               />
             ) : (
               <>
@@ -925,6 +1144,24 @@ function App() {
               </div>
             </motion.div>
 
+            <SolarSystemPlanner
+              mode={gameMode ?? 'mission'}
+              launchDate={launchDate}
+              onLaunchDateChange={updateLaunchDate}
+              positions={plannerPositions}
+              loading={plannerLoading}
+              errors={plannerErrors}
+              selectedBodyId={selectedPlannerBodyId}
+              selectedDestinationId={selectedDestinationId}
+              onSelectBody={setSelectedPlannerBodyId}
+              onSetDestination={(destinationId) => {
+                setSelectedDestinationId(destinationId)
+                const body = heliocentricBodies.find((candidate) => candidate.destinationId === destinationId)
+                if (body) setSelectedPlannerBodyId(body.id)
+                setTestedDesign(null)
+              }}
+            />
+
             <div className="grid gap-4 md:grid-cols-3">
               <div className="rounded-[24px] border border-white/8 bg-slate-900/75 p-4">
                 <p className="text-[10px] uppercase tracking-[0.25em] text-slate-400">
@@ -957,7 +1194,9 @@ function App() {
                   <span className="text-3xl font-semibold text-white">{metrics.transferTime}</span>
                   <span className="pb-1 text-xs text-slate-400">months</span>
                 </div>
-                <p className="mt-3 text-xs text-slate-400">Window calculated from {selectedDestination.label} entry geometry.</p>
+                <p className="mt-3 text-xs text-slate-400">
+                  Simplified game estimate only; not a JPL trajectory or launch window.
+                </p>
               </div>
             </div>
 
@@ -1431,7 +1670,7 @@ function App() {
                 { label: 'Communications', value: `${buildStats.communication}%` },
                 { label: 'Reliability', value: `${buildStats.reliability}%` },
                 { label: 'Mission risk', value: `${Math.round(metrics.missionRisk)} / 100` },
-                { label: 'Transit window', value: `${metrics.transferTime} months · ${selectedDestination.transfer}` },
+                { label: 'Transit duration', value: `${metrics.transferTime} months · ${selectedDestination.transfer}` },
               ]}
             />
             <MissionDataTable

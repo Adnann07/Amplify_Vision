@@ -2,7 +2,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { useProgress } from '@react-three/drei'
 import { Component, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ErrorInfo, ReactNode } from 'react'
-import { DoubleSide, Group, MeshStandardMaterial, Object3D, PCFShadowMap, PointLight, SphereGeometry, Vector3 } from 'three'
+import { Color, DoubleSide, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, Object3D, PCFShadowMap, PointLight, SphereGeometry, Vector3 } from 'three'
 import type { LaunchRecord } from '../../data/launchVehicles'
 import { NasaSlsRocket, ProceduralRocket } from './LaunchVehicleModels'
 
@@ -331,6 +331,167 @@ function EngineExhaust({
   )
 }
 
+function FailureExplosion({ startedAt, cause }: {
+  startedAt: number | null
+  cause: 'overload' | 'reliability'
+}) {
+  const group = useRef<Group>(null)
+  const sparks = useRef<import('three').InstancedMesh>(null)
+  const smokePuffs = useRef<import('three').InstancedMesh>(null)
+  const flashMesh = useRef<Mesh>(null)
+  const fireball = useRef<Mesh>(null)
+  const innerFireball = useRef<Mesh>(null)
+  const shockwave = useRef<Mesh>(null)
+  const explosionLight = useRef<PointLight>(null)
+  const flashMaterial = useRef<MeshBasicMaterial>(null)
+  const fireMaterial = useRef<MeshBasicMaterial>(null)
+  const innerFireMaterial = useRef<MeshBasicMaterial>(null)
+  const shockwaveMaterial = useRef<MeshBasicMaterial>(null)
+  const dummy = useMemo(() => new Object3D(), [])
+  const sparkGeometry = useMemo(() => new SphereGeometry(1, 7, 6), [])
+  const smokeGeometry = useMemo(() => new SphereGeometry(1, 10, 8), [])
+  const smokePuffMaterial = useMemo(
+    () => new MeshStandardMaterial({ color: '#485052', transparent: true, opacity: 0, roughness: 1, depthWrite: false }),
+    [],
+  )
+  const sparkMaterial = useMemo(() => new MeshBasicMaterial({ toneMapped: false, vertexColors: true }), [])
+  const sparkDirections = useMemo(
+    () =>
+      Array.from({ length: 56 }, (_, index) => {
+        const angle = index * 2.399963
+        const vertical = -0.72 + ((index * 37) % 100) / 100 * 1.44
+        const planar = Math.sqrt(1 - vertical * vertical)
+        return new Vector3(Math.cos(angle) * planar, vertical, Math.sin(angle) * planar)
+      }),
+    [],
+  )
+  const smokeDirections = useMemo(
+    () =>
+      Array.from({ length: 26 }, (_, index) => {
+        const angle = index * 2.399963
+        const vertical = -0.18 + ((index * 29) % 100) / 100 * 0.92
+        const planar = Math.sqrt(1 - vertical * vertical)
+        return new Vector3(Math.cos(angle) * planar, vertical, Math.sin(angle) * planar)
+      }),
+    [],
+  )
+
+  useEffect(() => {
+    const mesh = sparks.current
+    if (!mesh) return
+    sparkDirections.forEach((_, index) => {
+      const hue = index % 3 === 0 ? '#fff1c2' : index % 3 === 1 ? '#ffb13b' : '#e45228'
+      mesh.setColorAt(index, new Color(hue))
+    })
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
+  }, [sparkDirections])
+
+  useFrame(() => {
+    const mesh = sparks.current
+    const smoke = smokePuffs.current
+    if (!mesh || !smoke || !group.current) return
+    const elapsed = startedAt === null ? -1 : performance.now() / 1000 - startedAt - FAILURE_TIME
+    const active = elapsed >= 0
+    const blastProgress = active ? Math.min(1, elapsed / 0.58) : 0
+    const smokeProgress = active ? Math.min(1, Math.max(0, elapsed - 0.12) / 2.8) : 0
+    group.current.position.set(0, 61 + Math.max(0, elapsed) * 1.2, 0)
+
+    for (let index = 0; index < sparkDirections.length; index++) {
+      const particleAge = elapsed - 0.06
+      if (!active || particleAge < 0 || particleAge > 2.2) {
+        dummy.scale.setScalar(0)
+      } else {
+        const distance = particleAge * ((cause === 'overload' ? 12 : 15) + (index % 7) * 1.7)
+        dummy.position.copy(sparkDirections[index]).multiplyScalar(distance)
+        dummy.position.y -= particleAge * particleAge * 5
+        dummy.scale.setScalar(Math.max(0.001, (1 - particleAge / 2.2) * (0.45 + (index % 4) * 0.12)))
+      }
+      dummy.updateMatrix()
+      mesh.setMatrixAt(index, dummy.matrix)
+    }
+    mesh.instanceMatrix.needsUpdate = true
+
+    for (let index = 0; index < smokeDirections.length; index++) {
+      if (!active || elapsed < 0.12) {
+        dummy.scale.setScalar(0)
+      } else {
+        const age = elapsed - 0.12
+        const drift = smokeProgress * (6 + (index % 5) * 2.6)
+        dummy.position.copy(smokeDirections[index]).multiplyScalar(drift)
+        dummy.position.y += smokeProgress * (index % 5) * 2.5
+        const puffSize = Math.max(0.001, (5 + (index % 4) * 1.7) * smokeProgress)
+        dummy.scale.set(puffSize * 1.35, puffSize, puffSize * 1.35)
+        dummy.rotation.set(index * 0.37 + age * 0.09, index * 0.61, index * 0.23)
+      }
+      dummy.updateMatrix()
+      smoke.setMatrixAt(index, dummy.matrix)
+    }
+    smoke.instanceMatrix.needsUpdate = true
+
+    if (flashMaterial.current) {
+      flashMaterial.current.opacity = active ? Math.max(0, 0.96 * (1 - elapsed / 0.3)) : 0
+    }
+    if (fireMaterial.current) {
+      fireMaterial.current.opacity = active ? Math.max(0, 0.96 * (1 - Math.max(0, elapsed - 0.12) / 2.5)) : 0
+    }
+    if (innerFireMaterial.current) {
+      innerFireMaterial.current.opacity = active ? Math.max(0, 0.98 * (1 - elapsed / 1.15)) : 0
+    }
+    smokePuffMaterial.opacity = active ? 0.74 * Math.max(0, 1 - Math.max(0, elapsed - 1) / 8) : 0
+    if (shockwaveMaterial.current) {
+      shockwaveMaterial.current.opacity = active ? Math.max(0, 0.85 * (1 - elapsed / 1.15)) : 0
+    }
+    if (flashMesh.current) {
+      const flashSize = active ? 0.1 + Math.max(0, 1 - elapsed / 0.3) * 21 : 0
+      flashMesh.current.scale.setScalar(flashSize)
+    }
+    if (fireball.current) {
+      const fireSize = active ? 0.1 + blastProgress * (cause === 'overload' ? 32 : 27) : 0
+      fireball.current.scale.set(fireSize, fireSize * 0.92, fireSize)
+    }
+    if (innerFireball.current) {
+      const fireSize = active ? 0.1 + blastProgress * (cause === 'overload' ? 21 : 18) : 0
+      innerFireball.current.scale.set(fireSize, fireSize * 0.88, fireSize)
+    }
+    if (shockwave.current) {
+      shockwave.current.scale.setScalar(active ? 0.1 + Math.min(1, elapsed / 1.05) * (cause === 'overload' ? 38 : 32) : 0)
+    }
+    if (explosionLight.current) {
+      explosionLight.current.intensity = active ? Math.max(0, 115 * (1 - elapsed / 0.85)) : 0
+    }
+  })
+
+  return (
+    <group ref={group}>
+      <mesh ref={flashMesh}>
+        <sphereGeometry args={[1, 18, 14]} />
+        <meshBasicMaterial ref={flashMaterial} color="#fff0bf" transparent opacity={0} depthWrite={false} />
+      </mesh>
+      <mesh ref={fireball}>
+        <sphereGeometry args={[1, 24, 18]} />
+        <meshBasicMaterial ref={fireMaterial} color="#ff6a16" transparent opacity={0} toneMapped={false} depthWrite={false} />
+      </mesh>
+      <mesh ref={innerFireball}>
+        <sphereGeometry args={[1, 20, 16]} />
+        <meshBasicMaterial ref={innerFireMaterial} color="#ffd47a" transparent opacity={0} toneMapped={false} depthWrite={false} />
+      </mesh>
+      <instancedMesh ref={smokePuffs} args={[smokeGeometry, smokePuffMaterial, smokeDirections.length]} />
+      <mesh ref={shockwave} rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[1, 0.12, 8, 48]} />
+        <meshBasicMaterial ref={shockwaveMaterial} color="#ffb15d" transparent opacity={0} toneMapped={false} depthWrite={false} />
+      </mesh>
+      <instancedMesh ref={sparks} args={[sparkGeometry, sparkMaterial, sparkDirections.length]} />
+      <pointLight
+        ref={explosionLight}
+        color="#ff7b32"
+        distance={180}
+        intensity={0}
+        decay={2}
+      />
+    </group>
+  )
+}
+
 function isLaunchFailureCause(record: LaunchRecord) {
   return record.failureParameter === 'Spacecraft mass' ? 'overload' : 'reliability'
 }
@@ -360,6 +521,7 @@ function LaunchWorld({
     if (!root) return
 
     const liftoffProgress = Math.max(0, Math.min(1, (elapsed - LIFTOFF_TIME) / 6.1))
+    root.visible = true
     if (!launchFailed) {
       root.position.y = liftoffProgress * liftoffProgress * 255
       root.scale.setScalar(1 - liftoffProgress * 0.67)
@@ -369,11 +531,10 @@ function LaunchWorld({
       root.scale.setScalar(1)
       root.rotation.z = 0
     } else {
-      const failureProgress = Math.max(0, Math.min(1, (elapsed - FAILURE_TIME) / 2.6))
-      const wobble = failureCause === 'overload' ? 0.34 : 0.9
-      root.position.y = Math.max(-9, 16 - failureProgress * 25 + Math.sin(elapsed * 7) * failureProgress * 2.2)
-      root.scale.setScalar(1 - failureProgress * 0.13)
-      root.rotation.z = Math.sin(elapsed * (failureCause === 'overload' ? 4.2 : 7)) * wobble * failureProgress
+      const blastElapsed = elapsed - FAILURE_TIME
+      root.position.y = (FAILURE_TIME - LIFTOFF_TIME) * 7.2
+      root.scale.setScalar(Math.max(0, 1 - blastElapsed / 0.2))
+      root.visible = blastElapsed < 0.2
     }
 
     const shakeStrength = elapsed >= 2.35 && elapsed < FAILURE_TIME && (!launchFailed || elapsed < FAILURE_TIME)
@@ -431,6 +592,7 @@ function LaunchWorld({
         )}
         <EngineExhaust startedAt={startedAt} phase={phase} failed={launchFailed} />
       </group>
+      {launchFailed && startedAt !== null && <FailureExplosion startedAt={startedAt} cause={failureCause} />}
       <group position={[0, 0, 0]}>
         {startedAt !== null && <SmokePlume startedAt={startedAt} active={smokeActive} />}
       </group>
@@ -504,7 +666,7 @@ function phaseLabel(phase: SequencePhase, failed: boolean) {
     countdown1: '1',
     ignition: 'IGNITION',
     ascent: failed ? 'ASCENT ANOMALY' : 'LIFTOFF',
-    anomaly: 'ENGINE SHUTDOWN',
+    anomaly: failed ? 'MISSION FAILED' : 'ENGINE SHUTDOWN',
     orbit: 'HIGH-ALTITUDE VIEW',
     complete: failed ? 'LAUNCH FAILED' : 'LAUNCH SUCCESSFUL',
   }

@@ -1,4 +1,7 @@
 import type { MissionRequirementResult } from './missionGoals'
+import type { InstrumentType } from './spacecraftBuild'
+import type { HorizonsPosition } from './horizonsService'
+import type { PreliminaryTransferEstimate } from './missionPlanner'
 
 export interface LaunchVehicleSpec {
   id: string
@@ -41,6 +44,12 @@ export interface LaunchRecord {
   mode: 'mission' | 'freeplay'
   missionName: string
   destination: string
+  planningSnapshot: {
+    launchDate: string
+    destinationBodyId: string | null
+    ephemerides: HorizonsPosition[]
+    transferEstimate: PreliminaryTransferEstimate | null
+  }
   spacecraftName: string
   spacecraftMassKg: number
   existingMissionCostMillions: number
@@ -48,6 +57,16 @@ export interface LaunchRecord {
   totalMissionCostMillions: number
   missionBudgetMillions: number
   spacecraftReliability: number
+  missionTelemetry: {
+    power: number
+    deltaV: number
+    communication: number
+    instruments: number
+    instrumentType: InstrumentType
+    science: number
+    resourceEfficiency: number
+    sustainabilityLevel: 'High' | 'Medium' | 'Low'
+  }
   missionRequirementResults: MissionRequirementResult[]
   outcome: 'success' | 'failure'
   riskLevel: 'Low' | 'Moderate' | 'High'

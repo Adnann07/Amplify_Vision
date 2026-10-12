@@ -32,6 +32,8 @@ interface LaunchResultsProps {
   onRetry: (vehicle: LaunchVehicleSpec) => void
   onReturnToBuilder: () => void
   onChangeLaunchVehicle: () => void
+  onMissionFailure: () => void
+  onStartMissionSimulation: () => void
 }
 
 function formatCurrency(value: number) {
@@ -308,9 +310,13 @@ export function LaunchResults({
   onRetry,
   onReturnToBuilder,
   onChangeLaunchVehicle,
+  onMissionFailure,
+  onStartMissionSimulation,
 }: LaunchResultsProps) {
   const [sequenceComplete, setSequenceComplete] = useState(false)
-  const completeSequence = useCallback(() => setSequenceComplete(true), [])
+  const completeSequence = useCallback(() => {
+    setSequenceComplete(true)
+  }, [])
   const failed = record.outcome === 'failure'
 
   return (
@@ -321,13 +327,28 @@ export function LaunchResults({
       <h2 className="mt-2 text-2xl font-semibold text-white sm:text-3xl">
         {sequenceComplete
           ? failed
-            ? `LAUNCH FAILED — ${record.failureTitle}`
+            ? `MISSION FAILED — ${record.failureTitle}`
             : 'LAUNCH SUCCESSFUL'
           : 'Launch sequence in progress'}
       </h2>
       <p className="mt-2 text-sm text-slate-300">
         {record.missionName} · {record.destination} · {record.launchVehicle.name}
       </p>
+      <div className="mt-3 rounded-xl border border-white/8 bg-slate-950/35 px-3 py-2 text-xs text-slate-300">
+        <p>
+          Planning date (UTC): <span className="font-medium text-white">{record.planningSnapshot.launchDate}</span>
+          {' · '}
+          {record.planningSnapshot.ephemerides.length} matching-date Horizons positions captured
+        </p>
+        {record.planningSnapshot.transferEstimate && (
+          <p className="mt-1 text-slate-400">
+            Preliminary Earth–{record.planningSnapshot.transferEstimate.destinationBody} Hohmann estimate:{' '}
+            ~{Math.round(record.planningSnapshot.transferEstimate.transferDays)} days. This is not a launch window or mission outcome input.
+            {record.planningSnapshot.destinationBodyId === 'jupiter' && record.destination === 'Europa' &&
+              ' Europa is represented using Jupiter’s planetary position, not a moon ephemeris.'}
+          </p>
+        )}
+      </div>
 
       <div className="mt-6">
         <Suspense
@@ -376,7 +397,7 @@ export function LaunchResults({
           {failed ? (
             <section className="mt-5 rounded-2xl border border-rose-300/25 bg-rose-300/5 p-4" aria-labelledby="failure-report-title">
               <h3 id="failure-report-title" className="text-sm font-bold uppercase tracking-[0.12em] text-rose-100">
-                Failure report — {record.failureTitle}
+                MISSION FAILED — {record.failureTitle}
               </h3>
               <p className="mt-2 text-sm text-slate-200">{record.failureCause}</p>
               <dl className="mt-4 grid gap-3 sm:grid-cols-3">
@@ -394,7 +415,7 @@ export function LaunchResults({
               <p className="mt-3 text-xs text-rose-100/90">
                 {record.failureParameter === 'Spacecraft mass'
                   ? `Excess mass: ${Math.max(0, record.spacecraftMassKg - record.launchVehicle.payloadCapacityKg).toLocaleString()} kg`
-                  : 'Reliability fell below the minimum recommended for a stable ascent.'}
+                  : record.failureCause}
               </p>
               <p className="mt-4 border-l-2 border-rose-300/50 pl-3 text-sm italic leading-relaxed text-slate-200">
                 Mission Commander: “{record.commanderMessage}”
@@ -414,7 +435,7 @@ export function LaunchResults({
               <p className="mt-2 text-xs text-slate-300">
                 {record.mode === 'freeplay'
                   ? 'The sandbox records the launch outcome only; no campaign objective or mission completion is evaluated.'
-                  : 'The launch succeeded; mission objectives are still in progress and are not considered complete by reaching orbit.'}
+                  : 'The launch succeeded, but the campaign objective is not complete. Run the recorded-design mission assessment to determine whether its engineering constraints are satisfied.'}
               </p>
             </section>
           )}
@@ -434,9 +455,11 @@ export function LaunchResults({
                 ))}
               </ul>
               <p className="mt-3 text-xs text-slate-400">
-                {record.missionRequirementResults.every((result) => result.passed)
-                  ? 'All listed mission design constraints are satisfied. Mission objectives still require in-flight completion.'
-                  : 'These unmet constraints put mission completion at risk; a completed launch sequence does not mean mission success.'}
+                {failed
+                  ? 'These spacecraft constraints are shown for context; the vehicle failed during launch, before mission objectives could begin.'
+                  : record.missionRequirementResults.every((result) => result.passed)
+                    ? 'All listed design constraints are satisfied. Mission completion is decided separately by the recorded-design simulation.'
+                    : 'These unmet constraints can prevent the primary objective; the successful launch animation does not mean mission success.'}
               </p>
             </section>
           ) : (
@@ -466,17 +489,37 @@ export function LaunchResults({
             ))}
           </dl>
 
-          <div className="mt-5 grid gap-2 sm:grid-cols-3">
-            <button type="button" onClick={() => onRetry(record.launchVehicle)} className="rounded-xl bg-emerald-300 px-4 py-3 text-xs font-bold uppercase tracking-[0.12em] text-slate-950 transition hover:bg-emerald-200">
-              Retry Launch
+          {record.mode === 'mission' && !failed && (
+            <button
+              type="button"
+              onClick={onStartMissionSimulation}
+              className="mt-5 w-full rounded-xl bg-sky-300 px-4 py-4 text-xs font-bold uppercase tracking-[0.14em] text-slate-950 transition hover:bg-sky-200"
+            >
+              Run mission systems simulation
             </button>
-            <button type="button" onClick={onReturnToBuilder} className="rounded-xl border border-white/10 px-4 py-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-200 transition hover:border-white/25 hover:bg-white/5">
-              {record.mode === 'freeplay' ? 'Return to Freeplay' : 'Return to Spacecraft Builder'}
+          )}
+          {sequenceComplete && failed && record.mode === 'mission' && (
+            <button
+              type="button"
+              onClick={onMissionFailure}
+              className="mt-5 w-full rounded-xl border border-rose-300/25 bg-rose-300/10 px-4 py-3 text-xs font-bold uppercase tracking-[0.14em] text-rose-100 transition hover:bg-rose-300/15"
+            >
+              View campaign failure report
             </button>
-            <button type="button" onClick={onChangeLaunchVehicle} className="rounded-xl border border-sky-300/20 bg-sky-300/5 px-4 py-3 text-xs font-semibold uppercase tracking-[0.12em] text-sky-100 transition hover:bg-sky-300/10">
-              Change Launch Vehicle
-            </button>
-          </div>
+          )}
+          {sequenceComplete && (
+            <div className="mt-3 grid gap-2 sm:grid-cols-3">
+              <button type="button" onClick={() => onRetry(record.launchVehicle)} className="rounded-xl bg-emerald-300 px-4 py-3 text-xs font-bold uppercase tracking-[0.12em] text-slate-950 transition hover:bg-emerald-200">
+                Retry Launch
+              </button>
+              <button type="button" onClick={onReturnToBuilder} className="rounded-xl border border-white/10 px-4 py-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-200 transition hover:border-white/25 hover:bg-white/5">
+                Return to Spacecraft Builder
+              </button>
+              <button type="button" onClick={onChangeLaunchVehicle} className="rounded-xl border border-sky-300/20 bg-sky-300/5 px-4 py-3 text-xs font-semibold uppercase tracking-[0.12em] text-sky-100 transition hover:bg-sky-300/10">
+                Change Launch Vehicle
+              </button>
+            </div>
+          )}
         </>
       )}
     </section>

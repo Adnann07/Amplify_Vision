@@ -1,4 +1,5 @@
-import { campaignMissions, getCampaignMissionGoal, upcomingCampaignLevels } from '../../data/campaign'
+import { campaignMissions, getCampaignMissionGoal } from '../../data/campaign'
+import type { CampaignProgress } from '../../data/campaignProgress'
 
 interface HomeScreenProps {
   onMissionMode: () => void
@@ -69,12 +70,20 @@ export function HomeScreen({ onMissionMode, onFreeplayMode }: HomeScreenProps) {
 interface CampaignSelectionProps {
   onBack: () => void
   onSelectMission: (missionId: string) => void
+  progress: CampaignProgress
+  storageWarning: string | null
 }
 
 export function CampaignSelectionScreen({
   onBack,
   onSelectMission,
+  progress,
+  storageWarning,
 }: CampaignSelectionProps) {
+  const completedCount = campaignMissions.filter((mission) =>
+    progress.completedMissionIds.includes(mission.id),
+  ).length
+
   return (
     <main className="min-h-screen bg-[#020912] px-4 py-8 text-slate-100 sm:px-6">
       <div className="mx-auto max-w-6xl">
@@ -90,29 +99,43 @@ export function CampaignSelectionScreen({
           <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-sky-300">Mission mode · Campaign</p>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight text-white sm:text-4xl">Flight program</h1>
           <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-400">
-            Begin with a guided low-orbit mission. Later levels will introduce payload planning and budget trade-offs.
+            Complete the primary objective to unlock the next flight. Every attempt is scored and saved so you can replay missions to improve.
           </p>
+          <p className="mt-3 text-xs text-sky-100/80" aria-live="polite">
+            Campaign progress · {completedCount}/{campaignMissions.length} primary objectives complete · {progress.attempts.length} attempts recorded
+          </p>
+          {storageWarning && (
+            <p className="mt-3 rounded-xl border border-amber-300/20 bg-amber-300/5 px-4 py-3 text-xs text-amber-100" role="status">
+              {storageWarning} Progress remains available for this session.
+            </p>
+          )}
         </header>
 
-        <section aria-labelledby="level-one-title">
+        <section aria-labelledby="campaign-missions-title">
           <div className="mb-3 flex items-center gap-3">
             <span className="rounded-full border border-sky-300/20 bg-sky-300/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-sky-100">
-              Level 1
+              Campaign
             </span>
-            <h2 id="level-one-title" className="text-sm font-medium text-slate-300">Mission fundamentals</h2>
+            <h2 id="campaign-missions-title" className="text-sm font-medium text-slate-300">Playable missions</h2>
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             {campaignMissions.map((mission) => {
               const goal = getCampaignMissionGoal(mission)
+              const unlocked = mission.requiresMissionIds.every((id) =>
+                progress.completedMissionIds.includes(id),
+              )
+              const completed = progress.completedMissionIds.includes(mission.id)
+              const bestScore = progress.bestScores[mission.id]
+              const attempts = progress.attempts.filter((attempt) => attempt.missionId === mission.id).length
               return (
-                <article key={mission.id} className="rounded-[26px] border border-sky-300/20 bg-slate-900/80 p-5 sm:p-6">
+                <article key={mission.id} className={`rounded-[26px] border bg-slate-900/80 p-5 sm:p-6 ${unlocked ? 'border-sky-300/20' : 'border-white/10 opacity-75'}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-sky-300">Mission 01 · {mission.destination}</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-sky-300">Mission {String(mission.level).padStart(2, '0')} · {mission.destination}</p>
                       <h3 className="mt-2 text-xl font-semibold text-white">{mission.title}</h3>
                     </div>
-                    <span className="rounded-full border border-emerald-300/20 bg-emerald-300/5 px-2.5 py-1 text-[10px] text-emerald-100">
-                      {mission.difficulty}
+                    <span className={`rounded-full border px-2.5 py-1 text-[10px] ${completed ? 'border-emerald-300/20 bg-emerald-300/5 text-emerald-100' : unlocked ? 'border-sky-300/20 bg-sky-300/5 text-sky-100' : 'border-white/10 bg-white/5 text-slate-400'}`}>
+                      {completed ? `Complete · ${bestScore ?? 0}/100 best` : unlocked ? mission.difficulty : 'Locked'}
                     </span>
                   </div>
                   <p className="mt-3 text-sm leading-relaxed text-slate-300">{mission.summary}</p>
@@ -140,34 +163,18 @@ export function CampaignSelectionScreen({
                       </div>
                     </div>
                   </div>
+                  <p className="mt-3 text-[10px] text-slate-400">Attempts: {attempts} · Scoring: mission objective 40, engineering 20, budget 15, resources 10, science 10, optional 5.</p>
                   <button
                     type="button"
+                    disabled={!unlocked}
                     onClick={() => onSelectMission(mission.id)}
-                    className="mt-5 w-full rounded-xl bg-sky-300 px-4 py-3 text-xs font-bold uppercase tracking-[0.16em] text-slate-950 transition hover:bg-sky-200"
+                    className="mt-5 w-full rounded-xl bg-sky-300 px-4 py-3 text-xs font-bold uppercase tracking-[0.16em] text-slate-950 transition hover:bg-sky-200 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
                   >
-                    Review mission briefing
+                    {!unlocked ? 'Complete the previous mission to unlock' : completed ? 'Replay mission' : 'Review mission briefing'}
                   </button>
                 </article>
               )
             })}
-          </div>
-        </section>
-
-        <section className="mt-9" aria-labelledby="upcoming-levels-title">
-          <div className="mb-3 flex items-center gap-3">
-            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-              Upcoming
-            </span>
-            <h2 id="upcoming-levels-title" className="text-sm font-medium text-slate-400">Campaign roadmap</h2>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {upcomingCampaignLevels.map((level) => (
-              <div key={level.level} className="rounded-2xl border border-white/8 bg-slate-900/45 p-4">
-                <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-slate-500">Level {level.level} · In development</p>
-                <h3 className="mt-2 text-sm font-medium text-slate-300">{level.title}</h3>
-                <p className="mt-1 text-xs text-slate-500">{level.summary}</p>
-              </div>
-            ))}
           </div>
         </section>
       </div>
