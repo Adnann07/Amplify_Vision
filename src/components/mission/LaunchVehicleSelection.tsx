@@ -3,11 +3,15 @@ import { assessLaunchOutcome } from '../../data/launchOutcome'
 import { lazy, Suspense, useCallback, useState } from 'react'
 import type { MissionRequirementResult } from '../../data/missionGoals'
 
+const LaunchVehiclePreview = lazy(() =>
+  import('./LaunchVehiclePreview').then((module) => ({ default: module.LaunchVehiclePreview })),
+)
 const LaunchSequence = lazy(() =>
   import('./LaunchSequence').then((module) => ({ default: module.LaunchSequence })),
 )
 
 interface LaunchVehicleSelectionProps {
+  mode: 'mission' | 'freeplay'
   vehicles: LaunchVehicleSpec[]
   selectedVehicleId: string | null
   onSelectVehicle: (vehicleId: string) => void
@@ -34,31 +38,8 @@ function formatCurrency(value: number) {
   return value < 0 ? `-$${Math.abs(value).toLocaleString()}M` : `$${value.toLocaleString()}M`
 }
 
-function RocketVisual({ vehicle }: { vehicle: LaunchVehicleSpec }) {
-  return (
-    <svg
-      aria-hidden="true"
-      className="mx-auto"
-      width="82"
-      height={vehicle.visualHeight}
-      viewBox="0 0 82 150"
-      fill="none"
-      role="img"
-    >
-      <path d="M41 8C28 24 24 42 24 69v40h34V69C58 42 54 24 41 8Z" fill="#e2e8f0" />
-      <path d="M41 8C35 24 34 43 34 69v40h24V69C58 42 54 24 41 8Z" fill="#94a3b8" />
-      <path d="M24 70h34v11H24z" fill={vehicle.accent} />
-      <path d="M24 86 8 111h16V86Zm34 0 16 25H58V86Z" fill={vehicle.accent} />
-      <path d="M33 109h16v17H33z" fill="#64748b" />
-      <path d="M36 126h10l-5 19-5-19Z" fill={vehicle.accent} />
-      <circle cx="41" cy="50" r="7" fill="#082f49" stroke={vehicle.accent} strokeWidth="3" />
-      <path d="M34 28h14" stroke="#475569" strokeWidth="2" strokeLinecap="round" />
-      <path d="M35 35h12" stroke="#475569" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  )
-}
-
 export function LaunchVehicleSelection({
+  mode,
   vehicles,
   selectedVehicleId,
   onSelectVehicle,
@@ -84,7 +65,7 @@ export function LaunchVehicleSelection({
   const requirementsReady = missionRequirements
     .filter((requirement) => requirement.id !== 'maxBudget')
     .every((requirement) => requirement.passed)
-  const missionAtRisk = !requirementsReady || !selectedVehicleAffordable
+  const missionAtRisk = mode === 'mission' && (!requirementsReady || !selectedVehicleAffordable)
   const risk = selectedVehicle
     ? assessLaunchOutcome(spacecraftMassKg, spacecraftReliability, selectedVehicle)
     : null
@@ -95,14 +76,15 @@ export function LaunchVehicleSelection({
         <div className="flex flex-col gap-4 border-b border-white/10 pb-5 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-sky-300/80">
-              Launch configuration
+              {mode === 'freeplay' ? 'Freeplay launch configuration' : 'Launch configuration'}
             </p>
             <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">
               SELECT LAUNCH VEHICLE
             </h2>
             <p className="mt-2 text-sm text-slate-400">
-              Choose a launcher for {spacecraftName}. Values are simplified game-balancing figures,
-              not real-world rocket specifications.
+              {mode === 'freeplay'
+                ? `Choose a launcher for ${spacecraftName}. All engineering checks are advisory in freeplay.`
+                : `Choose a launcher for ${spacecraftName}. Values are simplified game-balancing figures, not real-world rocket specifications.`}
             </p>
           </div>
           <div className="rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3 text-sm">
@@ -132,9 +114,15 @@ export function LaunchVehicleSelection({
                     : 'border-white/10 bg-slate-950/35 hover:border-white/25 hover:bg-slate-950/60'
                 }`}
               >
-                <div className="flex min-h-[160px] items-center justify-center rounded-2xl bg-slate-950/50">
-                  <RocketVisual vehicle={vehicle} />
-                </div>
+                <Suspense
+                  fallback={
+                    <div className="flex h-[190px] min-h-[190px] items-center justify-center rounded-2xl border border-white/[0.04] bg-[#07111d]">
+                      <span className="h-6 w-6 animate-spin rounded-full border-2 border-sky-300/25 border-t-sky-300" aria-label="Loading 3D launcher preview" />
+                    </div>
+                  }
+                >
+                  <LaunchVehiclePreview vehicle={vehicle} />
+                </Suspense>
                 <div className="mt-4 flex items-start justify-between gap-2">
                   <div>
                     <h3 className="text-lg font-semibold text-white">{vehicle.name}</h3>
@@ -163,11 +151,11 @@ export function LaunchVehicleSelection({
                     </dd>
                   </div>
                   <div className="flex justify-between gap-3">
-                    <dt className="text-slate-400">Total mission cost</dt>
+                    <dt className="text-slate-400">{mode === 'freeplay' ? 'Total configuration cost' : 'Total mission cost'}</dt>
                     <dd className="font-medium text-white">{formatCurrency(totalCostMillions)}</dd>
                   </div>
                   <div className="flex justify-between gap-3">
-                    <dt className="text-slate-400">Budget remaining</dt>
+                    <dt className="text-slate-400">{mode === 'freeplay' ? 'Target remaining' : 'Budget remaining'}</dt>
                     <dd className={affordable ? 'font-medium text-emerald-200' : 'font-medium text-rose-200'}>
                       {formatCurrency(remainingBudgetMillions)}
                     </dd>
@@ -184,12 +172,36 @@ export function LaunchVehicleSelection({
                     : `Payload overload: ${Math.abs(remainingCapacityKg).toLocaleString()} kg.`}
                 </p>
                 {fits && !affordable && (
-                  <p className="mt-1 text-xs text-amber-200">Mission budget exceeded.</p>
+                <p className="mt-1 text-xs text-amber-200">
+                  {mode === 'freeplay' ? 'Configured spending target exceeded.' : 'Mission budget exceeded.'}
+                </p>
                 )}
               </button>
             )
           })}
         </div>
+        <p className="mt-4 text-center text-[10px] leading-relaxed text-slate-500">
+          Heavy launcher model: NASA Space Launch System by NASA/Alex Arredondo.
+          {' '}
+          <a
+            href="https://science.nasa.gov/3d-resources/space-launch-system-sls/"
+            target="_blank"
+            rel="noreferrer"
+            className="text-slate-300 underline decoration-slate-600 underline-offset-2 hover:text-white"
+          >
+            NASA model source
+          </a>
+          {' · '}
+          <a
+            href="https://www.nasa.gov/nasa-brand-center/images-and-media/"
+            target="_blank"
+            rel="noreferrer"
+            className="text-slate-300 underline decoration-slate-600 underline-offset-2 hover:text-white"
+          >
+            Media use guidance
+          </a>
+          . Small and medium vehicles are generic detailed 3D designs.
+        </p>
 
         <div
           className={`mt-5 rounded-2xl border p-4 ${
@@ -219,7 +231,8 @@ export function LaunchVehicleSelection({
               )}
               {!selectedVehicle && (
                 <p className="mt-1 text-xs text-slate-400">
-                  Mission budget available: {formatCurrency(missionBudgetLimitMillions)} of{' '}
+                  {mode === 'freeplay' ? 'Spending target available: ' : 'Mission budget available: '}
+                  {formatCurrency(missionBudgetLimitMillions)} of{' '}
                   {formatCurrency(missionBudgetMillions)} configured.
                 </p>
               )}
@@ -234,7 +247,10 @@ export function LaunchVehicleSelection({
                         <p>Warning: spacecraft exceeds this rocket&apos;s payload capacity by {Math.abs(selectedVehicle.payloadCapacityKg - spacecraftMassKg).toLocaleString()} kg.</p>
                       )}
                       {!selectedVehicleAffordable && (
-                        <p>Warning: mission budget will be exceeded by {formatCurrency(Math.abs(selectedTotalCost - missionBudgetLimitMillions))}.</p>
+                        <p>
+                          Warning: {mode === 'freeplay' ? 'configured spending target' : 'mission budget'} will be exceeded by{' '}
+                          {formatCurrency(Math.abs(selectedTotalCost - missionBudgetLimitMillions))}.
+                        </p>
                       )}
                       {spacecraftReliability < 60 && (
                         <p>Warning: spacecraft reliability is {spacecraftReliability}%—below the 60% risk threshold.</p>
@@ -254,9 +270,11 @@ export function LaunchVehicleSelection({
                     </div>
                   )}
                   <p className="text-slate-300">
-                    {missionAtRisk
-                      ? 'Mission constraints are at risk, but a launch can still be attempted. Launch outcome is based on payload and spacecraft reliability.'
-                      : 'Mission constraints are on target. Launch risk is based on payload and spacecraft reliability; the exact outcome is not revealed before liftoff.'}
+                    {mode === 'freeplay'
+                      ? 'Freeplay risk estimates are advisory. Payload and spacecraft reliability determine launch risk; the exact outcome remains hidden until liftoff.'
+                      : missionAtRisk
+                        ? 'Mission constraints are at risk, but a launch can still be attempted. Launch outcome is based on payload and spacecraft reliability.'
+                        : 'Mission constraints are on target. Launch risk is based on payload and spacecraft reliability; the exact outcome is not revealed before liftoff.'}
                   </p>
                 </div>
               )}
@@ -394,30 +412,41 @@ export function LaunchResults({
                 Spacecraft mass is within the launch vehicle payload capacity and spacecraft reliability is sufficient for ascent.
               </p>
               <p className="mt-2 text-xs text-slate-300">
-                The launch succeeded; mission objectives are still in progress and are not considered complete by reaching orbit.
+                {record.mode === 'freeplay'
+                  ? 'The sandbox records the launch outcome only; no campaign objective or mission completion is evaluated.'
+                  : 'The launch succeeded; mission objectives are still in progress and are not considered complete by reaching orbit.'}
               </p>
             </section>
           )}
 
-          <section className="mt-4 rounded-2xl border border-white/10 bg-slate-950/35 p-4">
-            <h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-slate-200">
-              Mission systems check · {record.missionRequirementResults.filter((result) => result.passed).length}/{record.missionRequirementResults.length} constraints met
-            </h3>
-            <ul className="mt-3 grid gap-2 sm:grid-cols-2">
-              {record.missionRequirementResults.map((result) => (
-                <li key={result.id} className={`rounded-lg border px-3 py-2 text-xs ${result.passed ? 'border-emerald-300/10 text-emerald-100' : 'border-amber-300/15 text-amber-100'}`}>
-                  <span aria-hidden="true">{result.passed ? '✓ ' : '⚠ '}</span>
-                  {result.label}: {result.displayActual} / {result.displayTarget}
-                  {!result.passed && <span className="block pt-1 text-slate-400">{result.problem}</span>}
-                </li>
-              ))}
-            </ul>
-            <p className="mt-3 text-xs text-slate-400">
-              {record.missionRequirementResults.every((result) => result.passed)
-                ? 'All listed mission design constraints are satisfied. Mission objectives still require in-flight completion.'
-                : 'These unmet constraints put mission completion at risk; a completed launch sequence does not mean mission success.'}
-            </p>
-          </section>
+          {record.mode === 'mission' ? (
+            <section className="mt-4 rounded-2xl border border-white/10 bg-slate-950/35 p-4">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-slate-200">
+                Mission systems check · {record.missionRequirementResults.filter((result) => result.passed).length}/{record.missionRequirementResults.length} constraints met
+              </h3>
+              <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+                {record.missionRequirementResults.map((result) => (
+                  <li key={result.id} className={`rounded-lg border px-3 py-2 text-xs ${result.passed ? 'border-emerald-300/10 text-emerald-100' : 'border-amber-300/15 text-amber-100'}`}>
+                    <span aria-hidden="true">{result.passed ? '✓ ' : '⚠ '}</span>
+                    {result.label}: {result.displayActual} / {result.displayTarget}
+                    {!result.passed && <span className="block pt-1 text-slate-400">{result.problem}</span>}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-3 text-xs text-slate-400">
+                {record.missionRequirementResults.every((result) => result.passed)
+                  ? 'All listed mission design constraints are satisfied. Mission objectives still require in-flight completion.'
+                  : 'These unmet constraints put mission completion at risk; a completed launch sequence does not mean mission success.'}
+              </p>
+            </section>
+          ) : (
+            <section className="mt-4 rounded-2xl border border-violet-300/15 bg-violet-300/5 p-4">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-violet-100">Sandbox flight record</h3>
+              <p className="mt-2 text-xs leading-relaxed text-slate-300">
+                No campaign mission requirements were applied. Use the launch report and spacecraft telemetry to guide your next design.
+              </p>
+            </section>
+          )}
 
           <dl className="mt-4 grid gap-3 sm:grid-cols-2">
             {[
@@ -427,8 +456,8 @@ export function LaunchResults({
               ['Rocket payload capacity', `${record.launchVehicle.payloadCapacityKg.toLocaleString()} kg`],
               ['Estimated launch risk', record.riskLevel],
               ['Launch cost', formatCurrency(record.launchVehicle.launchCostMillions)],
-              ['Total mission cost', formatCurrency(record.totalMissionCostMillions)],
-              ['Mission budget', formatCurrency(record.missionBudgetMillions)],
+              [record.mode === 'freeplay' ? 'Configuration cost' : 'Total mission cost', formatCurrency(record.totalMissionCostMillions)],
+              [record.mode === 'freeplay' ? 'Spending target' : 'Mission budget', formatCurrency(record.missionBudgetMillions)],
             ].map(([label, value]) => (
               <div key={label} className="rounded-xl border border-white/8 bg-slate-950/35 p-3">
                 <dt className="text-[10px] uppercase tracking-[0.15em] text-slate-400">{label}</dt>
@@ -442,7 +471,7 @@ export function LaunchResults({
               Retry Launch
             </button>
             <button type="button" onClick={onReturnToBuilder} className="rounded-xl border border-white/10 px-4 py-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-200 transition hover:border-white/25 hover:bg-white/5">
-              Return to Spacecraft Builder
+              {record.mode === 'freeplay' ? 'Return to Freeplay' : 'Return to Spacecraft Builder'}
             </button>
             <button type="button" onClick={onChangeLaunchVehicle} className="rounded-xl border border-sky-300/20 bg-sky-300/5 px-4 py-3 text-xs font-semibold uppercase tracking-[0.12em] text-sky-100 transition hover:bg-sky-300/10">
               Change Launch Vehicle

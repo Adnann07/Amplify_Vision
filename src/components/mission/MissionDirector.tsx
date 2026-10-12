@@ -2,10 +2,15 @@ import { Bounds, Float, Stars, useGLTF, useProgress } from '@react-three/drei'
 import { Canvas } from '@react-three/fiber'
 import { Component, Suspense, useState, type ReactNode } from 'react'
 import type { MissionBriefing } from '../../data/missionBriefing'
+import type { MissionGoal } from '../../data/missionGoals'
 
 interface MissionDirectorProps {
   briefing: MissionBriefing
+  missionGoal: MissionGoal
   onStart: () => void
+  onBack?: () => void
+  startLabel?: string
+  backLabel?: string
 }
 
 interface AvatarProps {
@@ -130,7 +135,14 @@ function AvatarLoadStatus() {
   )
 }
 
-export function MissionDirector({ briefing, onStart }: MissionDirectorProps) {
+export function MissionDirector({
+  briefing,
+  missionGoal,
+  onStart,
+  onBack,
+  startLabel = 'Start Mission',
+  backLabel = 'Back to mission selection',
+}: MissionDirectorProps) {
   const [avatarFailed, setAvatarFailed] = useState(false)
 
   return (
@@ -143,7 +155,7 @@ export function MissionDirector({ briefing, onStart }: MissionDirectorProps) {
         <header className="flex items-center justify-between gap-4 border-b border-white/10 px-6 py-5 sm:px-8">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.32em] text-sky-300">
-              Amplify Vision · Mission briefing
+              Amplify Vision · Level {briefing.level} Mission Briefing
             </p>
             <h1 id="briefing-title" className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">
               {briefing.title}
@@ -219,6 +231,25 @@ export function MissionDirector({ briefing, onStart }: MissionDirectorProps) {
               <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-sky-300">
                 Mission: {briefing.missionName}
               </p>
+              <p className="mt-3 text-sm leading-relaxed text-slate-200">{briefing.scenario}</p>
+              <dl className="mt-4 grid gap-2 rounded-xl border border-white/8 bg-slate-950/35 p-3 text-xs sm:grid-cols-2">
+                <div>
+                  <dt className="text-[9px] uppercase tracking-[0.16em] text-slate-500">Budget limit</dt>
+                  <dd className="mt-1 text-slate-100">
+                    {missionGoal.requirements.maxBudget === undefined
+                      ? 'No fixed mission cap'
+                      : `$${missionGoal.requirements.maxBudget.toLocaleString()}M`}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-[9px] uppercase tracking-[0.16em] text-slate-500">Mass constraint</dt>
+                  <dd className="mt-1 text-slate-100">
+                    {missionGoal.requirements.maxMass === undefined
+                      ? 'Set by the selected launch vehicle'
+                      : `${missionGoal.requirements.maxMass.toLocaleString()} kg`}
+                  </dd>
+                </div>
+              </dl>
               <ul className="mt-4 space-y-3">
                 {briefing.objectives.map((objective) => (
                   <li key={objective} className="flex items-start gap-3 text-sm text-slate-200">
@@ -230,12 +261,21 @@ export function MissionDirector({ briefing, onStart }: MissionDirectorProps) {
             </section>
 
             <div className="mt-auto pt-6">
+              {onBack && (
+                <button
+                  type="button"
+                  onClick={onBack}
+                  className="mb-3 w-full rounded-xl border border-white/10 px-4 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-300 transition hover:border-white/25 hover:text-white"
+                >
+                  {backLabel}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={onStart}
                 className="w-full rounded-2xl bg-sky-300 px-5 py-4 text-sm font-bold uppercase tracking-[0.2em] text-slate-950 shadow-[0_0_32px_rgba(56,189,248,0.22)] transition hover:bg-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-200 focus:ring-offset-2 focus:ring-offset-slate-950"
               >
-                Start Mission
+                {startLabel}
               </button>
               <p className="mt-3 text-center text-[10px] text-slate-500">
                 Character model: <a

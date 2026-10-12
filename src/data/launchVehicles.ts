@@ -3,41 +3,42 @@ import type { MissionRequirementResult } from './missionGoals'
 export interface LaunchVehicleSpec {
   id: string
   name: string
+  visualClass: 'small' | 'medium' | 'heavy'
   payloadCapacityKg: number
   launchCostMillions: number
   accent: string
-  visualHeight: number
 }
 
 export const launchVehicles: LaunchVehicleSpec[] = [
   {
     id: 'small-launcher',
     name: 'Small Launcher',
+    visualClass: 'small',
     payloadCapacityKg: 1500,
     launchCostMillions: 60,
     accent: '#38bdf8',
-    visualHeight: 104,
   },
   {
     id: 'medium-launcher',
     name: 'Medium Launcher',
+    visualClass: 'medium',
     payloadCapacityKg: 5000,
     launchCostMillions: 100,
     accent: '#a78bfa',
-    visualHeight: 124,
   },
   {
     id: 'heavy-launcher',
     name: 'Heavy Launcher',
+    visualClass: 'heavy',
     payloadCapacityKg: 15000,
     launchCostMillions: 180,
     accent: '#34d399',
-    visualHeight: 144,
   },
 ]
 
 export interface LaunchRecord {
   attemptId: number
+  mode: 'mission' | 'freeplay'
   missionName: string
   destination: string
   spacecraftName: string

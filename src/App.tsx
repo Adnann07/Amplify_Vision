@@ -21,10 +21,15 @@ import {
   type SustainabilityChoices,
 } from './data/sustainability'
 import { destinations, propulsionOptions, spacecraftCatalog } from './data/spacecraft'
-import { earthObservationBriefing } from './data/missionBriefing'
 import { launchVehicles, type LaunchRecord, type LaunchVehicleSpec } from './data/launchVehicles'
 import { LaunchResults, LaunchVehicleSelection } from './components/mission/LaunchVehicleSelection'
 import { assessLaunchOutcome } from './data/launchOutcome'
+import { HomeScreen, CampaignSelectionScreen } from './components/mission/GameModeSelection'
+import { campaignMissions, getCampaignMissionGoal } from './data/campaign'
+
+type GameMode = 'mission' | 'freeplay'
+type EntryScreen = 'home' | 'campaign' | 'briefing' | 'builder'
+type BriefingOrigin = 'campaign' | 'builder'
 
 const SpacecraftViewer = lazy(() =>
   import('./components/3d/SpacecraftViewer').then((module) => ({ default: module.SpacecraftViewer })),
@@ -72,9 +77,12 @@ function MissionDataTable({ title, rows }: MissionDataTableProps) {
 }
 
 function App() {
-  const [missionStarted, setMissionStarted] = useState(false)
+  const [entryScreen, setEntryScreen] = useState<EntryScreen>('home')
+  const [briefingOrigin, setBriefingOrigin] = useState<BriefingOrigin>('campaign')
+  const [gameMode, setGameMode] = useState<GameMode | null>(null)
   const [selectedSpacecraft, setSelectedSpacecraft] = useState(spacecraftCatalog[0])
-  const [selectedMissionId, setSelectedMissionId] = useState('europa-recon')
+  const [selectedCampaignMissionId, setSelectedCampaignMissionId] = useState(campaignMissions[0].id)
+  const [selectedMissionId, setSelectedMissionId] = useState('earth-observation')
   const [testedDesign, setTestedDesign] = useState<string | null>(null)
   const [launchScreen, setLaunchScreen] = useState<'builder' | 'selection' | 'results'>('builder')
   const [selectedLaunchVehicleId, setSelectedLaunchVehicleId] = useState<string | null>(null)
@@ -97,13 +105,15 @@ function App() {
     propulsionOptions.find((option) => option.id === selectedPropulsionId) ?? propulsionOptions[0]
   const selectedMission =
     missionGoals.find((mission) => mission.id === selectedMissionId) ?? missionGoals[0]
+  const selectedCampaignMission =
+    campaignMissions.find((mission) => mission.id === selectedCampaignMissionId) ?? campaignMissions[0]
   const selectedLaunchVehicle =
     launchVehicles.find((vehicle) => vehicle.id === selectedLaunchVehicleId) ?? null
   const missionBudgetMillions = budget * 1000
-  const missionBudgetLimitMillions = Math.min(
-    missionBudgetMillions,
-    selectedMission.requirements.maxBudget ?? Number.POSITIVE_INFINITY,
-  )
+  const missionBudgetLimitMillions =
+    gameMode === 'freeplay'
+      ? missionBudgetMillions
+      : Math.min(missionBudgetMillions, selectedMission.requirements.maxBudget ?? Number.POSITIVE_INFINITY)
   const canEditAssembly = selectedSpacecraft.model.format !== 'unavailable'
   const isEarthOrbitMission = selectedDestinationId === 'earth-orbit'
   const sustainability = useMemo(
@@ -143,13 +153,18 @@ function App() {
       maxBudget: missionBudgetLimitMillions,
     },
   }
-  const missionRequirements = evaluateMissionRequirements(missionWithBudgetLimit, {
-    ...buildStats,
-    missionCost: totalMissionCost,
-  })
+  const missionRequirements =
+    gameMode === 'freeplay'
+      ? []
+      : evaluateMissionRequirements(missionWithBudgetLimit, {
+          ...buildStats,
+          missionCost: totalMissionCost,
+        })
   const metRequirements = missionRequirements.filter((requirement) => requirement.passed).length
-  const missionReadiness = Math.round((metRequirements / missionRequirements.length) * 100)
-  const missionPassed = metRequirements === missionRequirements.length
+  const missionReadiness = missionRequirements.length
+    ? Math.round((metRequirements / missionRequirements.length) * 100)
+    : 0
+  const missionPassed = missionRequirements.length > 0 && metRequirements === missionRequirements.length
   const designSignature = JSON.stringify([
     selectedMissionId,
     selectedSpacecraft.id,
@@ -209,15 +224,27 @@ function App() {
     }
   }, [buildStats, payload, riskTolerance, selectedDestination.risk, selectedPropulsion.efficiency, totalMissionCost])
 
-  const missionChecklist = [
-    `${selectedDestination.environment} route validated`,
-    `${selectedPropulsion.label} transfer window optimized`,
-    `${buildStats.communication}% communications link margin`,
-    `${payload.toLocaleString()} kg payload balance within thermal envelope`,
-    ...(selectedLaunchVehicle
-      ? [`${selectedLaunchVehicle.name} assigned · ${formatCurrency(selectedLaunchVehicle.launchCostMillions)} launch cost`]
-      : []),
-  ]
+  const missionChecklist =
+    gameMode === 'freeplay'
+      ? [
+          `Destination selected: ${selectedDestination.label}`,
+          `${selectedPropulsion.label} propulsion selected`,
+          `Spacecraft power output: ${buildStats.power.toLocaleString()} W`,
+          `Communications link: ${buildStats.communication}%`,
+          `Spacecraft launch mass: ${buildStats.mass.toLocaleString()} kg`,
+          ...(selectedLaunchVehicle
+            ? [`${selectedLaunchVehicle.name} selected · ${formatCurrency(selectedLaunchVehicle.launchCostMillions)} launch cost`]
+            : []),
+        ]
+      : [
+          `${selectedDestination.environment} route validated`,
+          `${selectedPropulsion.label} transfer window optimized`,
+          `${buildStats.communication}% communications link margin`,
+          `${payload.toLocaleString()} kg payload balance within thermal envelope`,
+          ...(selectedLaunchVehicle
+            ? [`${selectedLaunchVehicle.name} assigned · ${formatCurrency(selectedLaunchVehicle.launchCostMillions)} launch cost`]
+            : []),
+        ]
   const remainingMissionBudget = missionBudgetLimitMillions - metrics.totalCost
   const availableComponents: BuildComponentId[] = ['solarPanel', 'antenna', 'engine', 'instrument']
   const updateBuild = <Key extends keyof typeof build>(key: Key, value: (typeof build)[Key]) =>
@@ -259,7 +286,8 @@ function App() {
     setSelectedLaunchVehicleId(vehicle.id)
     setLaunchRecord({
       attemptId,
-      missionName: selectedMission.name,
+      mode: gameMode ?? 'mission',
+      missionName: gameMode === 'freeplay' ? 'Freeplay Sandbox' : selectedMission.name,
       destination: selectedDestination.label,
       spacecraftName: selectedSpacecraft.name,
       spacecraftMassKg: buildStats.mass,
@@ -274,7 +302,43 @@ function App() {
     setLaunchScreen('results')
   }
 
-  if (!missionStarted) {
+  if (entryScreen === 'home') {
+    return (
+      <HomeScreen
+        onMissionMode={() => setEntryScreen('campaign')}
+        onFreeplayMode={() => {
+          setGameMode('freeplay')
+          setTestedDesign(null)
+          setLaunchRecord(null)
+          setLaunchScreen('builder')
+          setEntryScreen('builder')
+        }}
+      />
+    )
+  }
+
+  if (entryScreen === 'campaign') {
+    return (
+      <CampaignSelectionScreen
+        onBack={() => setEntryScreen('home')}
+        onSelectMission={(missionId) => {
+          const campaignMission = campaignMissions.find((mission) => mission.id === missionId)
+          if (!campaignMission) throw new Error(`Unknown campaign mission "${missionId}".`)
+          const missionGoal = getCampaignMissionGoal(campaignMission)
+          setGameMode('mission')
+          setSelectedCampaignMissionId(campaignMission.id)
+          setSelectedMissionId(campaignMission.missionGoalId)
+          setSelectedDestinationId(missionGoal.destinationId)
+          setBriefingOrigin('campaign')
+          setLaunchRecord(null)
+          setLaunchScreen('builder')
+          setEntryScreen('briefing')
+        }}
+      />
+    )
+  }
+
+  if (entryScreen === 'briefing') {
     return (
       <Suspense
         fallback={
@@ -284,12 +348,12 @@ function App() {
         }
       >
         <MissionDirector
-          briefing={earthObservationBriefing}
-          onStart={() => {
-            setSelectedMissionId(earthObservationBriefing.id)
-            setSelectedDestinationId('earth-orbit')
-            setMissionStarted(true)
-          }}
+          briefing={selectedCampaignMission.briefing}
+          missionGoal={getCampaignMissionGoal(selectedCampaignMission)}
+          onBack={() => setEntryScreen(briefingOrigin)}
+          onStart={() => setEntryScreen('builder')}
+          startLabel={briefingOrigin === 'builder' ? 'Return to Spacecraft Design' : 'Continue to Spacecraft Design'}
+          backLabel={briefingOrigin === 'builder' ? 'Return to design' : 'Back to mission selection'}
         />
       </Suspense>
     )
@@ -301,21 +365,45 @@ function App() {
         <header className="mb-6 flex flex-col gap-4 border-b border-white/10 pb-5 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="mb-2 text-[10px] font-medium uppercase tracking-[0.35em] text-sky-300/80">
-              Mission architecture
+              {gameMode === 'freeplay' ? 'Freeplay · Open sandbox' : 'Mission Mode · Level 1'}
             </p>
             <h1 className="text-3xl font-semibold tracking-[-0.06em] text-white sm:text-4xl">
               Amplify Vision
             </h1>
           </div>
-          <div className={`flex items-center gap-3 rounded-full border px-3 py-2 text-sm ${
-            designNeedsReview
-              ? 'border-amber-400/20 bg-amber-400/5 text-amber-100'
-              : 'border-sky-400/20 bg-sky-400/5 text-sky-100'
-          }`}>
-            <span className={`h-2.5 w-2.5 rounded-full ${
-              designNeedsReview ? 'bg-amber-400' : 'bg-emerald-400 shadow-[0_0_12px_rgba(74,222,128,0.9)]'
-            }`} />
-            {designNeedsReview ? 'Design needs review' : 'Mission ready for flight review'}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className={`flex items-center gap-3 rounded-full border px-3 py-2 text-sm ${
+              designNeedsReview
+                ? 'border-amber-400/20 bg-amber-400/5 text-amber-100'
+                : 'border-sky-400/20 bg-sky-400/5 text-sky-100'
+            }`}>
+              <span className={`h-2.5 w-2.5 rounded-full ${
+                designNeedsReview ? 'bg-amber-400' : 'bg-emerald-400 shadow-[0_0_12px_rgba(74,222,128,0.9)]'
+              }`} />
+              {designNeedsReview ? 'Design needs review' : 'Mission ready for flight review'}
+            </div>
+            {gameMode === 'mission' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setBriefingOrigin('builder')
+                  setEntryScreen('briefing')
+                }}
+                className="rounded-full border border-sky-300/20 px-4 py-2 text-xs font-semibold text-sky-100 transition hover:bg-sky-300/10"
+              >
+                Review briefing
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setGameMode(null)
+                setEntryScreen('home')
+              }}
+              className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-slate-300 transition hover:border-white/25 hover:text-white"
+            >
+              Exit to game modes
+            </button>
           </div>
         </header>
 
@@ -378,18 +466,24 @@ function App() {
                   <label htmlFor="destination" className="mb-2 block text-[11px] uppercase tracking-[0.25em] text-slate-400">
                     Destination
                   </label>
-                  <select
-                    id="destination"
-                    value={selectedDestinationId}
-                    onChange={(event) => setSelectedDestinationId(event.target.value)}
-                    className="w-full rounded-2xl border border-white/10 bg-slate-950/40 px-3 py-3 text-sm text-slate-100 outline-none ring-0 transition focus:border-sky-400/60"
-                  >
-                    {destinations.map((destination) => (
-                      <option key={destination.id} value={destination.id}>
-                        {destination.label}
-                      </option>
-                    ))}
-                  </select>
+                  {gameMode === 'freeplay' ? (
+                    <select
+                      id="destination"
+                      value={selectedDestinationId}
+                      onChange={(event) => setSelectedDestinationId(event.target.value)}
+                      className="w-full rounded-2xl border border-white/10 bg-slate-950/40 px-3 py-3 text-sm text-slate-100 outline-none ring-0 transition focus:border-sky-400/60"
+                    >
+                      {destinations.map((destination) => (
+                        <option key={destination.id} value={destination.id}>
+                          {destination.label}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <p className="rounded-2xl border border-white/10 bg-slate-950/40 px-3 py-3 text-sm text-slate-100">
+                      {selectedDestination.label} · set by mission
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -737,6 +831,7 @@ function App() {
           <section className="space-y-6">
             {launchScreen === 'selection' ? (
               <LaunchVehicleSelection
+                mode={gameMode ?? 'mission'}
                 vehicles={launchVehicles}
                 selectedVehicleId={selectedLaunchVehicleId}
                 onSelectVehicle={setSelectedLaunchVehicleId}
@@ -747,7 +842,7 @@ function App() {
                 existingMissionCostMillions={buildStats.missionCost}
                 missionBudgetMillions={missionBudgetMillions}
                 missionBudgetLimitMillions={missionBudgetLimitMillions}
-                designTested={hasTestedCurrentDesign}
+                designTested={gameMode === 'freeplay' || hasTestedCurrentDesign}
                 missionRequirements={missionRequirements}
                 spacecraftReliability={buildStats.reliability}
               />
@@ -832,7 +927,9 @@ function App() {
 
             <div className="grid gap-4 md:grid-cols-3">
               <div className="rounded-[24px] border border-white/8 bg-slate-900/75 p-4">
-                <p className="text-[10px] uppercase tracking-[0.25em] text-slate-400">Readiness</p>
+                <p className="text-[10px] uppercase tracking-[0.25em] text-slate-400">
+                  {gameMode === 'freeplay' ? 'Design profile score' : 'Mission readiness'}
+                </p>
                 <div className="mt-3 flex items-end gap-2">
                   <span className="text-3xl font-semibold text-white">{Math.round(metrics.missionReadiness)}</span>
                   <span className="pb-1 text-xs text-slate-400">/ 100</span>
@@ -866,6 +963,18 @@ function App() {
 
             <div className="grid items-start gap-4 lg:grid-cols-2">
               <section className="min-w-0 rounded-[24px] border border-white/8 bg-slate-900/75 p-4">
+                {gameMode === 'freeplay' ? (
+                  <div className="flex h-full min-h-52 flex-col justify-between">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-[0.22em] text-violet-300">Freeplay engineering readout</p>
+                      <h3 className="mt-1 text-base font-medium text-white">No campaign objectives applied</h3>
+                      <p className="mt-3 text-xs leading-relaxed text-slate-400">
+                        Use the live telemetry and warnings to explore your design. Mission requirements and campaign progression do not restrict freeplay launches.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <>
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <div>
                     <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400">
@@ -914,6 +1023,8 @@ function App() {
                     </tbody>
                   </table>
                 </div>
+                  </>
+                )}
               </section>
 
               <section className="min-w-0 rounded-[24px] border border-white/8 bg-slate-900/75 p-4">
@@ -921,7 +1032,9 @@ function App() {
                   <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400">
                     Cost control · USD millions
                   </p>
-                  <h3 className="mt-1 text-base font-medium text-white">Mission budget ledger</h3>
+                  <h3 className="mt-1 text-base font-medium text-white">
+                    {gameMode === 'freeplay' ? 'Optional spending target' : 'Mission budget ledger'}
+                  </h3>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[320px] border-collapse text-left text-xs">
@@ -936,7 +1049,7 @@ function App() {
                     </thead>
                     <tbody>
                       {[
-                        ['Spacecraft & mission', formatCurrency(buildStats.missionCost)],
+                        [gameMode === 'freeplay' ? 'Spacecraft & systems' : 'Spacecraft & mission', formatCurrency(buildStats.missionCost)],
                         [
                           `Launch · ${selectedLaunchVehicle?.name ?? 'not selected'}`,
                           selectedLaunchVehicle
@@ -944,8 +1057,8 @@ function App() {
                             : '—',
                         ],
                         ['Total mission cost', formatCurrency(metrics.totalCost)],
-                        ['Mission budget limit', formatCurrency(missionBudgetLimitMillions)],
-                        ['Budget remaining', formatCurrency(remainingMissionBudget)],
+                        [gameMode === 'freeplay' ? 'Configured target' : 'Mission budget limit', formatCurrency(missionBudgetLimitMillions)],
+                        [gameMode === 'freeplay' ? 'Target remaining' : 'Budget remaining', formatCurrency(remainingMissionBudget)],
                       ].map(([label, amount], index) => (
                         <tr
                           key={label}
@@ -980,7 +1093,9 @@ function App() {
 
             <div className="grid items-start gap-4 lg:grid-cols-2">
               <section className="min-w-0 rounded-[24px] border border-white/8 bg-slate-900/75 p-4 lg:col-span-2">
-                <h3 className="mb-3 text-base font-medium text-white">Flight review checklist</h3>
+                <h3 className="mb-3 text-base font-medium text-white">
+                  {gameMode === 'freeplay' ? 'Configuration review' : 'Flight review checklist'}
+                </h3>
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[420px] border-collapse text-left text-xs">
                     <caption className="sr-only">Current flight review checklist</caption>
@@ -1114,43 +1229,55 @@ function App() {
             <section className="rounded-[28px] border border-sky-400/15 bg-slate-900/75 p-5 shadow-[0_15px_55px_rgba(15,23,42,0.45)]">
               <div className="mb-4">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.25em] text-sky-300/80">
-                  Mission selection
+                  {gameMode === 'freeplay' ? 'Freeplay controls' : 'Mission selection'}
                 </p>
-                <h2 className="mt-1 text-lg font-medium text-white">Choose your objective</h2>
+                <h2 className="mt-1 text-lg font-medium text-white">
+                  {gameMode === 'freeplay' ? 'Experiment freely' : 'Choose your objective'}
+                </h2>
               </div>
-              <div className="mb-5 grid grid-cols-2 gap-2">
-                {missionGoals.map((mission) => {
-                  const selected = mission.id === selectedMissionId
-                  return (
-                    <button
-                      key={mission.id}
-                      type="button"
-                      aria-pressed={selected}
-                      onClick={() => {
-                        setSelectedMissionId(mission.id)
-                        setSelectedDestinationId(mission.destinationId)
-                      }}
-                      className={`min-h-16 rounded-xl border px-3 py-2 text-left transition ${
-                        selected
-                          ? 'border-sky-300/50 bg-sky-400/10 text-white'
-                          : 'border-white/8 bg-slate-950/30 text-slate-300 hover:border-white/20'
-                      }`}
-                    >
-                      <span className="block text-xs font-medium">{mission.name}</span>
-                      <span className="mt-1 block text-[10px] text-slate-400">{mission.destination}</span>
-                    </button>
-                  )
-                })}
-              </div>
-
+              {gameMode === 'freeplay' ? (
+                <div>
+                  <p className="text-sm leading-relaxed text-slate-300">
+                    Select any available spacecraft, tune its systems, pick a destination, and attempt a launch. Engineering warnings are advisory; no mission checklist is required.
+                  </p>
+                  <label htmlFor="freeplay-objective" className="mt-5 block text-xs font-medium text-slate-200">
+                    Optional reference objective
+                  </label>
+                  <select
+                    id="freeplay-objective"
+                    value={selectedMissionId}
+                    onChange={(event) => {
+                      const mission = missionGoals.find((item) => item.id === event.target.value)
+                      if (!mission) return
+                      setSelectedMissionId(mission.id)
+                      setSelectedDestinationId(mission.destinationId)
+                    }}
+                    className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/50 px-3 py-3 text-sm text-slate-100 outline-none focus:border-violet-300/60"
+                  >
+                    {missionGoals.map((mission) => (
+                      <option key={mission.id} value={mission.id}>
+                        {mission.name} · optional
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setLaunchScreen('selection')}
+                    className="mt-5 w-full rounded-xl bg-violet-300 px-4 py-3 text-xs font-bold uppercase tracking-[0.16em] text-slate-950 transition hover:bg-violet-200"
+                  >
+                    Choose Launch Vehicle
+                  </button>
+                </div>
+              ) : (
+                <>
               <div className="border-t border-white/8 pt-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-white">
-                      {selectedMission.name}
+                      {selectedCampaignMission.title}
                     </h3>
                     <p className="mt-1 text-xs leading-relaxed text-slate-400">
-                      {selectedMission.description}
+                      {selectedCampaignMission.objective}
                     </p>
                   </div>
                   <span className="shrink-0 rounded-full border border-sky-300/20 bg-sky-300/10 px-2 py-1 text-xs font-semibold text-sky-100">
@@ -1166,6 +1293,13 @@ function App() {
                 <p className="mt-1.5 text-[10px] text-slate-400">
                   {metRequirements} / {missionRequirements.length} requirements met
                 </p>
+                <button
+                  type="button"
+                  onClick={() => setEntryScreen('briefing')}
+                  className="mt-3 w-full rounded-lg border border-sky-300/20 bg-sky-300/5 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-100 transition hover:bg-sky-300/10"
+                >
+                  Review Mission Briefing
+                </button>
               </div>
 
               <div className="mt-4">
@@ -1253,6 +1387,8 @@ function App() {
                   )}
                 </div>
               )}
+                </>
+              )}
             </section>
 
             <MissionDataTable
@@ -1270,9 +1406,9 @@ function App() {
               ]}
             />
             <MissionDataTable
-              title="Mission summary"
+              title={gameMode === 'freeplay' ? 'Freeplay summary' : 'Mission summary'}
               rows={[
-                { label: 'Objective', value: selectedMission.name },
+                { label: gameMode === 'freeplay' ? 'Mode' : 'Objective', value: gameMode === 'freeplay' ? 'Open sandbox' : selectedMission.name },
                 { label: 'Destination', value: selectedDestination.label },
                 { label: 'Distance', value: selectedDestination.distance },
                 { label: 'Environment', value: selectedDestination.environment },
@@ -1281,11 +1417,13 @@ function App() {
               ]}
             />
             <MissionDataTable
-              title="Mission performance"
+              title={gameMode === 'freeplay' ? 'Engineering telemetry' : 'Mission performance'}
               rows={[
                 {
-                  label: 'Readiness',
-                  value: `${missionReadiness}% · ${metRequirements}/${missionRequirements.length} requirements`,
+                  label: gameMode === 'freeplay' ? 'Campaign requirements' : 'Readiness',
+                  value: gameMode === 'freeplay'
+                    ? 'Not applied'
+                    : `${missionReadiness}% · ${metRequirements}/${missionRequirements.length} requirements`,
                 },
                 { label: 'Launch mass', value: `${buildStats.mass.toLocaleString()} kg` },
                 { label: 'Power / load', value: `${buildStats.power.toLocaleString()} / ${buildStats.powerDemand.toLocaleString()} W` },

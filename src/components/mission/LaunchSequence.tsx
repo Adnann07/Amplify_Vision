@@ -1,14 +1,13 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { useGLTF, useProgress } from '@react-three/drei'
+import { useProgress } from '@react-three/drei'
 import { Component, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ErrorInfo, ReactNode } from 'react'
 import { DoubleSide, Group, MeshStandardMaterial, Object3D, PCFShadowMap, PointLight, SphereGeometry, Vector3 } from 'three'
 import type { LaunchRecord } from '../../data/launchVehicles'
+import { NasaSlsRocket, ProceduralRocket } from './LaunchVehicleModels'
 
 type SequencePhase = 'loading' | 'countdown3' | 'countdown2' | 'countdown1' | 'ignition' | 'ascent' | 'anomaly' | 'orbit' | 'complete'
 
-const MODEL_SCALE = 0.16
-const MODEL_BASE_OFFSET = -0.208
 const LIFTOFF_TIME = 4.1
 const FAILURE_TIME = 6.35
 const COMPLETE_TIME = 11.2
@@ -46,133 +45,6 @@ class LaunchAssetBoundary extends Component<LaunchAssetBoundaryProps, LaunchAsse
   render() {
     return this.state.failed ? this.props.fallback : this.props.children
   }
-}
-
-function NasaSlsRocket({ onReady }: { onReady: () => void }) {
-  const { scene } = useGLTF('/models/nasa-sls-rocket.glb')
-  const rocket = useMemo(() => scene.clone(true), [scene])
-  useEffect(() => onReady(), [onReady])
-  return <primitive object={rocket} position={[0, MODEL_BASE_OFFSET, 0]} scale={MODEL_SCALE} />
-}
-
-function ProceduralRocket({
-  variant,
-  onReady,
-}: {
-  variant: 'small' | 'medium' | 'heavy'
-  onReady: () => void
-}) {
-  const height = variant === 'small' ? 66 : variant === 'medium' ? 79 : 93
-  const size = height / 93
-  const radius = variant === 'small' ? 3.6 : variant === 'medium' ? 4.5 : 5.2
-  const boosterRadius = variant === 'small' ? 1.15 : 1.5
-  const boosterOffset = radius + boosterRadius + 0.25
-  const boosters = variant === 'small' ? 0 : variant === 'medium' ? 2 : 4
-
-  useEffect(() => onReady(), [onReady])
-
-  return (
-    <group scale={[size, size, size]}>
-      <mesh position={[0, 16, 0]} castShadow>
-        <cylinderGeometry args={[radius * 0.94, radius, 32, 48]} />
-        <meshStandardMaterial color="#d5d4cf" metalness={0.32} roughness={0.42} />
-      </mesh>
-      <mesh position={[0, 40, 0]} castShadow>
-        <cylinderGeometry args={[radius, radius, 32, 48]} />
-        <meshStandardMaterial color="#bc4e1f" metalness={0.18} roughness={0.55} />
-      </mesh>
-      <mesh position={[0, 57, 0]} castShadow>
-        <cylinderGeometry args={[radius * 0.79, radius, 3, 48]} />
-        <meshStandardMaterial color="#313b43" metalness={0.7} roughness={0.32} />
-      </mesh>
-      <mesh position={[0, 67, 0]} castShadow>
-        <cylinderGeometry args={[radius * 0.7, radius * 0.79, 17, 48]} />
-        <meshStandardMaterial color="#e4e2dc" metalness={0.28} roughness={0.4} />
-      </mesh>
-      <mesh position={[0, 79, 0]} castShadow>
-        <cylinderGeometry args={[radius * 0.7, radius * 0.7, 8, 48]} />
-        <meshStandardMaterial color="#c8c9c5" metalness={0.25} roughness={0.42} />
-      </mesh>
-      <mesh position={[0, 88, 0]} castShadow>
-        <cylinderGeometry args={[0, radius * 0.7, 12, 48]} />
-        <meshStandardMaterial color="#e3e1da" metalness={0.18} roughness={0.4} />
-      </mesh>
-
-      {[8, 10, 23, 55, 59, 75, 83].map((y) => (
-        <mesh key={y} position={[0, y, 0]} castShadow>
-          <cylinderGeometry args={[y === 55 || y === 59 ? radius * 0.96 : radius * 1.015, y === 55 || y === 59 ? radius * 0.96 : radius * 1.015, 0.55, 48]} />
-          <meshStandardMaterial color={y === 23 ? '#e1e2dd' : '#687780'} metalness={0.62} roughness={0.34} />
-        </mesh>
-      ))}
-      {[28, 33, 49].map((y) => (
-        <mesh key={`stage-line-${y}`} position={[0, y, 0]} castShadow>
-          <cylinderGeometry args={[radius * 1.002, radius * 1.002, 0.22, 48]} />
-          <meshStandardMaterial color="#e9b48d" metalness={0.22} roughness={0.48} />
-        </mesh>
-      ))}
-      {[0, Math.PI / 2, Math.PI, (Math.PI * 3) / 2].map((angle) => (
-        <mesh
-          key={`rail-${angle}`}
-          position={[Math.sin(angle) * radius, 39, Math.cos(angle) * radius]}
-          rotation={[0, -angle, 0]}
-          castShadow
-        >
-          <boxGeometry args={[0.16, 28, 0.22]} />
-          <meshStandardMaterial color="#773d2a" metalness={0.28} roughness={0.48} />
-        </mesh>
-      ))}
-
-      {Array.from({ length: boosters }, (_, index) => {
-        const angle = (Math.PI * 2 * index) / boosters
-        const x = Math.sin(angle) * boosterOffset
-        const z = Math.cos(angle) * boosterOffset
-        return (
-          <group key={index} position={[x, 0, z]}>
-            <mesh position={[0, 39, 0]} castShadow>
-              <cylinderGeometry args={[boosterRadius, boosterRadius, 58, 24]} />
-              <meshStandardMaterial color="#e0dfd9" metalness={0.3} roughness={0.42} />
-            </mesh>
-            <mesh position={[0, 70, 0]} castShadow>
-              <coneGeometry args={[boosterRadius, 8, 24]} />
-              <meshStandardMaterial color="#d9d8d2" metalness={0.2} roughness={0.42} />
-            </mesh>
-            <mesh position={[0, 8, 0]} castShadow>
-              <cylinderGeometry args={[boosterRadius * 0.73, boosterRadius, 4, 24]} />
-              <meshStandardMaterial color="#4b555b" metalness={0.75} roughness={0.3} />
-            </mesh>
-          </group>
-        )
-      })}
-
-      {Array.from({ length: variant === 'small' ? 3 : 4 }, (_, index) => {
-        const angle = (Math.PI * 2 * index) / (variant === 'small' ? 3 : 4)
-        const x = Math.sin(angle) * radius * 0.48
-        const z = Math.cos(angle) * radius * 0.48
-        return (
-          <mesh key={`engine-${index}`} position={[x, 2, z]} rotation={[Math.PI, 0, 0]}>
-            <cylinderGeometry args={[0.7, 1.1, 3, 16, 1, true]} />
-            <meshStandardMaterial color="#252d32" metalness={0.82} roughness={0.25} side={DoubleSide} />
-          </mesh>
-        )
-      })}
-
-      {[0, 1, 2, 3].map((index) => (
-        <mesh
-          key={`fin-${index}`}
-          position={[
-            Math.sin((index * Math.PI) / 2) * radius * 0.8,
-            5,
-            Math.cos((index * Math.PI) / 2) * radius * 0.8,
-          ]}
-          rotation={[0, (index * Math.PI) / 2, 0]}
-          castShadow
-        >
-          <boxGeometry args={[0.3, 9, 2.2]} />
-          <meshStandardMaterial color="#9da5a6" metalness={0.65} roughness={0.35} />
-        </mesh>
-      ))}
-    </group>
-  )
 }
 
 function Beam({ position, size, color = '#aab5b8', rotation = [0, 0, 0] }: {
