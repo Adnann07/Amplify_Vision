@@ -84,6 +84,9 @@ type StoredCampaignEvaluation = CampaignEvaluation & { previousBestScore: number
 const SpacecraftViewer = lazy(() =>
   import('./components/3d/SpacecraftViewer').then((module) => ({ default: module.SpacecraftViewer })),
 )
+const defaultSpacecraft =
+  availableSpacecraftCatalog.find((spacecraft) => spacecraft.id === 'landsat-8') ??
+  availableSpacecraftCatalog[0]
 const MissionDirector = lazy(() =>
   import('./components/mission/MissionDirector').then((module) => ({ default: module.MissionDirector })),
 )
@@ -95,6 +98,11 @@ const SpaceWeatherControl = lazy(() =>
 )
 const MissionControlPage = lazy(() =>
   import('./components/mission/MissionControl').then((module) => ({ default: module.MissionControl })),
+)
+const CinematicLandingPage = lazy(() =>
+  import('./components/landing/CinematicLandingPage').then((module) => ({
+    default: module.CinematicLandingPage,
+  })),
 )
 
 function clamp(value: number, min: number, max: number) {
@@ -224,6 +232,9 @@ function App() {
   const [missionControlWarning, setMissionControlWarning] =
     useState<string | null>(missionControlRestore.warning)
   const missionControlSessionRef = useRef(missionControlRestore.session)
+  const [showCinematicLanding, setShowCinematicLanding] = useState(
+    () => !window.location.hash && !missionControlRestore.session,
+  )
   const [entryScreen, setEntryScreen] = useState<EntryScreen>('home')
   const [briefingOrigin, setBriefingOrigin] = useState<BriefingOrigin>('campaign')
   const [gameMode, setGameMode] = useState<GameMode | null>(
@@ -234,7 +245,7 @@ function App() {
       (spacecraft) =>
         spacecraft.id === missionControlRestore.session?.record.spacecraftId ||
         spacecraft.name === missionControlRestore.session?.record.spacecraftName,
-    ) ?? availableSpacecraftCatalog[0],
+    ) ?? defaultSpacecraft,
   )
   const [selectedCampaignMissionId, setSelectedCampaignMissionId] = useState(
     missionControlRestore.session?.campaignMissionId ?? campaignMissions[0].id,
@@ -353,7 +364,7 @@ function App() {
             (spacecraft) =>
               spacecraft.id === restored.session?.record.spacecraftId ||
               spacecraft.name === restored.session?.record.spacecraftName,
-          ) ?? availableSpacecraftCatalog[0],
+          ) ?? defaultSpacecraft,
         )
         setMissionControlWarning(saveMissionControlSession(restored.session))
         setLaunchScreen('mission-control')
@@ -819,6 +830,25 @@ function App() {
           }
         }}
       />
+    )
+  }
+
+  if (showCinematicLanding) {
+    return (
+      <Suspense
+        fallback={
+          <div className="grid min-h-screen place-items-center bg-[#02060d] text-[10px] uppercase tracking-[0.2em] text-slate-400">
+            Preparing flight systems
+          </div>
+        }
+      >
+        <CinematicLandingPage
+          onEnter={() => {
+            setShowCinematicLanding(false)
+            setEntryScreen('home')
+          }}
+        />
+      </Suspense>
     )
   }
 
@@ -1498,7 +1528,11 @@ function App() {
                     </div>
                   }
                 >
-                  <SpacecraftViewer spacecraft={selectedSpacecraft} build={build} />
+                  <SpacecraftViewer
+                    spacecraft={selectedSpacecraft}
+                    build={build}
+                    onSelectSpacecraft={setSelectedSpacecraft}
+                  />
                 </Suspense>
                 <div className="flex flex-col gap-4 rounded-[24px] border border-white/8 bg-slate-950/45 p-4">
                   <div>

@@ -1,24 +1,10 @@
 import { OrbitControls, Sparkles, Stars } from '@react-three/drei'
 import { Canvas, useThree } from '@react-three/fiber'
-import { Component, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import {
-  Box3,
-  BufferGeometry,
-  Float32BufferAttribute,
-  Group,
-  Material,
-  Mesh,
-  MeshStandardMaterial,
-  PerspectiveCamera,
-  Sphere,
-  Texture,
-  Vector3,
-} from 'three'
-import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
-import { STLLoader } from 'three/addons/loaders/STLLoader.js'
+import { Component, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Box3, Group, PerspectiveCamera, Sphere, Vector3 } from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
-import type { SpacecraftSpec } from '../../data/spacecraft'
+import { availableSpacecraftCatalog, type SpacecraftSpec } from '../../data/spacecraft'
+import { loadSpacecraftModel, type LoadedModel } from './spacecraftModelLoader'
 import {
   antennaOptions,
   engineOptions,
@@ -31,11 +17,7 @@ import {
 interface SpacecraftViewerProps {
   spacecraft: SpacecraftSpec
   build: SpacecraftBuild
-}
-
-interface LoadedModel {
-  root: Group
-  dispose: () => void
+  onSelectSpacecraft?: (spacecraft: (typeof availableSpacecraftCatalog)[number]) => void
 }
 
 type ViewerLoadState =
@@ -98,175 +80,6 @@ function SpacecraftViewerFallback({ spacecraft }: { spacecraft: SpacecraftSpec }
       </div>
     </div>
   )
-}
-
-function disposeObject(root: Group) {
-  const geometries = new Set<BufferGeometry>()
-  const materials = new Set<Material>()
-  const textures = new Set<Texture>()
-
-  root.traverse((object) => {
-    if (!(object instanceof Mesh)) return
-    geometries.add(object.geometry)
-    const meshMaterials = Array.isArray(object.material) ? object.material : [object.material]
-
-    for (const material of meshMaterials) {
-      materials.add(material)
-      for (const value of Object.values(material)) {
-        if (value instanceof Texture) textures.add(value)
-      }
-    }
-  })
-
-  geometries.forEach((geometry) => geometry.dispose())
-  materials.forEach((material) => material.dispose())
-  textures.forEach((texture) => texture.dispose())
-}
-
-function centerGeometry(source: BufferGeometry) {
-  const geometry = source.clone()
-  geometry.computeBoundingBox()
-  const center = geometry.boundingBox?.getCenter(new Vector3())
-  if (!center) throw new Error('STL model has no measurable geometry.')
-  geometry.translate(-center.x, -center.y, -center.z)
-  return geometry
-}
-
-function componentForPath(path: string): BuildComponentId | undefined {
-  const name = path.toLowerCase()
-  if (name.includes('dish') || name.includes('antenna')) return 'antenna'
-  if (name.includes('wing') || name.includes('solar')) return 'solarPanel'
-  if (name.includes('instrument') || name.includes('sensor')) return 'instrument'
-  return undefined
-}
-
-function splitSolarWingGeometry(source: BufferGeometry) {
-  const positions = source.getAttribute('position')
-  const bounds = source.boundingBox ?? source.computeBoundingBox()
-  if (!bounds) throw new Error('Solar wing model has no measurable geometry.')
-
-  const midpoint = (bounds.min.x + bounds.max.x) / 2
-  const vertices: [number[], number[]] = [[], []]
-
-  for (let index = 0; index < positions.count; index += 3) {
-    const centroidX =
-      (positions.getX(index) + positions.getX(index + 1) + positions.getX(index + 2)) / 3
-    const side = centroidX < midpoint ? 0 : 1
-
-    for (let vertex = 0; vertex < 3; vertex += 1) {
-      const positionIndex = index + vertex
-      vertices[side].push(
-        positions.getX(positionIndex),
-        positions.getY(positionIndex),
-        positions.getZ(positionIndex),
-      )
-    }
-  }
-
-  return vertices.map((sideVertices) => {
-    if (sideVertices.length === 0) throw new Error('Solar wing model could not be split.')
-    const geometry = new BufferGeometry()
-    geometry.setAttribute('position', new Float32BufferAttribute(sideVertices, 3))
-    geometry.computeVertexNormals()
-    geometry.rotateZ(Math.PI / 2)
-    return centerGeometry(geometry)
-  })
-}
-
-async function loadSpacecraftModel(spacecraft: SpacecraftSpec): Promise<LoadedModel> {
-  const model = spacecraft.model
-  if (model.format === 'unavailable') throw new Error('This spacecraft has no verified 3D model.')
-
-  if (model.format === 'glb') {
-    const dracoLoader = new DRACOLoader()
-    dracoLoader.setDecoderPath(`${import.meta.env.BASE_URL}draco/`)
-    const gltfLoader = new GLTFLoader()
-    gltfLoader.setDRACOLoader(dracoLoader)
-    const gltf = await gltfLoader.loadAsync(model.modelPath).finally(() => {
-      dracoLoader.dispose()
-    })
-
-    const root = new Group()
-    root.add(gltf.scene)
-    root.traverse((object) => {
-      if (object instanceof Mesh) {
-        object.userData.component = componentForPath(object.name)
-      }
-    })
-    return { root, dispose: () => disposeObject(root) }
-  }
-
-  const stlLoader = new STLLoader()
-  const paths = [
-    ...new Set([
-      ...model.parts.map((part) => part.path),
-      ...(model.solarWings ? [model.solarWings.path] : []),
-    ]),
-  ]
-  const results = await Promise.allSettled(paths.map((path) => stlLoader.loadAsync(path)))
-  const failedResult = results.find(
-    (result): result is PromiseRejectedResult => result.status === 'rejected',
-  )
-
-  if (failedResult) {
-    results.forEach((result) => {
-      if (result.status === 'fulfilled') result.value.dispose()
-    })
-    throw failedResult.reason
-  }
-
-  const sourceGeometry = new Map(
-    paths.map((path, index) => [path, (results[index] as PromiseFulfilledResult<BufferGeometry>).value]),
-  )
-  const root = new Group()
-  const material = new MeshStandardMaterial({
-    color: spacecraft.accent,
-    metalness: 0.58,
-    roughness: 0.42,
-  })
-
-  try {
-    for (const part of model.parts) {
-      const source = sourceGeometry.get(part.path)
-      if (!source) throw new Error(`Unable to load model component: ${part.path}`)
-
-      const mesh = new Mesh(centerGeometry(source), material)
-      mesh.position.set(...part.position)
-      mesh.rotation.set(...part.rotation)
-      mesh.userData.component = componentForPath(part.path)
-      mesh.castShadow = true
-      mesh.receiveShadow = true
-      root.add(mesh)
-    }
-
-    if (model.solarWings) {
-      const source = sourceGeometry.get(model.solarWings.path)
-      if (!source) throw new Error(`Unable to load model component: ${model.solarWings.path}`)
-      source.computeBoundingBox()
-
-      const [leftWing, rightWing] = splitSolarWingGeometry(source)
-      for (const [geometry, direction] of [
-        [leftWing, -1],
-        [rightWing, 1],
-      ] as const) {
-        const mesh = new Mesh(geometry, material)
-        mesh.position.x = direction * model.solarWings.centerOffset
-        mesh.userData.component = 'solarPanel'
-        mesh.castShadow = true
-        mesh.receiveShadow = true
-        root.add(mesh)
-      }
-    }
-
-    root.scale.setScalar(model.scale)
-  } catch (error) {
-    disposeObject(root)
-    sourceGeometry.forEach((geometry) => geometry.dispose())
-    throw error
-  }
-
-  sourceGeometry.forEach((geometry) => geometry.dispose())
-  return { root, dispose: () => disposeObject(root) }
 }
 
 function AssemblyComponents({
@@ -487,19 +300,25 @@ function ModelFramer({
   )
 }
 
-export function SpacecraftViewer({ spacecraft, build }: SpacecraftViewerProps) {
+const SpacecraftOrbitGallery = lazy(() =>
+  import('./SpacecraftOrbitGallery').then((module) => ({
+    default: module.SpacecraftOrbitGallery,
+  })),
+)
+
+export function SpacecraftViewer({
+  spacecraft,
+  build,
+  onSelectSpacecraft,
+}: SpacecraftViewerProps) {
   const [attempt, setAttempt] = useState(0)
   const [viewerFailed, setViewerFailed] = useState(false)
-  const [assemblyState, setAssemblyState] = useState({
-    spacecraftId: spacecraft.id,
-    disassembled: false,
-  })
+  const [galleryOpen, setGalleryOpen] = useState(false)
+  const disassembled = false
   const [loadState, setLoadState] = useState<ViewerLoadState>({
     spacecraftId: '',
     status: 'loading',
   })
-  const disassembled =
-    assemblyState.spacecraftId === spacecraft.id && assemblyState.disassembled
 
   useEffect(() => {
     let cancelled = false
@@ -551,24 +370,24 @@ export function SpacecraftViewer({ spacecraft, build }: SpacecraftViewerProps) {
       : `${spacecraft.id}.${spacecraft.model.format}${spacecraft.model.format === 'stl' ? ' assembly' : ''}`
 
   return (
-    <div className="relative h-[430px] overflow-hidden rounded-[28px] border border-white/10 bg-[#020912] shadow-[0_0_45px_rgba(34,211,238,0.08)]">
+    <>
+    <div
+      aria-hidden={galleryOpen}
+      className={`relative h-[430px] overflow-hidden rounded-[28px] border border-white/10 bg-[#020912] shadow-[0_0_45px_rgba(34,211,238,0.08)] ${
+        galleryOpen ? 'invisible' : ''
+      }`}
+    >
       <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between gap-2 border-b border-white/10 bg-slate-950/45 px-4 py-3 backdrop-blur-sm">
         <span className="text-[10px] uppercase tracking-[0.28em] text-sky-200/75">Mission model</span>
         <div className="flex items-center gap-2">
-          {!viewerFailed && currentState.status === 'ready' && (
+          {onSelectSpacecraft && (
             <button
+              id="explore-models-button"
               type="button"
-              aria-pressed={disassembled}
-              onClick={() =>
-                setAssemblyState({ spacecraftId: spacecraft.id, disassembled: !disassembled })
-              }
-              className={`rounded-full border px-2.5 py-1 text-[10px] font-medium transition ${
-                disassembled
-                  ? 'border-amber-300/35 bg-amber-300/10 text-amber-100 hover:bg-amber-300/20'
-                  : 'border-white/15 bg-white/5 text-slate-200 hover:border-sky-300/40 hover:text-sky-100'
-              }`}
+              onClick={() => setGalleryOpen(true)}
+              className="rounded-full border border-sky-300/25 bg-sky-300/5 px-3 py-1.5 text-[10px] font-medium text-sky-100 transition hover:border-sky-200/60 hover:bg-sky-300/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-300"
             >
-              {disassembled ? 'Assemble' : 'Disassemble'}
+              Explore All Models
             </button>
           )}
           <span className="rounded-full border border-sky-400/30 bg-sky-400/10 px-2.5 py-1 text-[10px] font-medium text-sky-100">
@@ -583,7 +402,7 @@ export function SpacecraftViewer({ spacecraft, build }: SpacecraftViewerProps) {
         </div>
       )}
 
-      {!viewerFailed ? (
+      {!galleryOpen && !viewerFailed ? (
         <SpacecraftCanvasBoundary
           key={`${spacecraft.id}-${attempt}`}
           onFailure={() => setViewerFailed(true)}
@@ -610,11 +429,11 @@ export function SpacecraftViewer({ spacecraft, build }: SpacecraftViewerProps) {
             )}
           </Canvas>
         </SpacecraftCanvasBoundary>
-      ) : (
+      ) : !galleryOpen ? (
         <SpacecraftViewerFallback spacecraft={spacecraft} />
-      )}
+      ) : null}
 
-      {!viewerFailed && currentState.status === 'loading' && (
+      {!galleryOpen && !viewerFailed && currentState.status === 'loading' && (
         <div
           className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-slate-950/55 pt-8 backdrop-blur-[2px]"
           role="status"
@@ -625,7 +444,7 @@ export function SpacecraftViewer({ spacecraft, build }: SpacecraftViewerProps) {
         </div>
       )}
 
-      {currentState.status === 'error' && (
+      {!galleryOpen && currentState.status === 'error' && (
         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-slate-950/80 px-6 pt-8 text-center">
           <p className="text-sm font-medium text-white">Unable to load 3D model.</p>
           <p className="text-xs text-slate-400">{currentState.message}</p>
@@ -639,7 +458,7 @@ export function SpacecraftViewer({ spacecraft, build }: SpacecraftViewerProps) {
         </div>
       )}
 
-      {currentState.status === 'unavailable' && (
+      {!galleryOpen && currentState.status === 'unavailable' && (
         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-slate-950/80 px-6 pt-8 text-center">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-200">
             3D model unavailable
@@ -656,5 +475,25 @@ export function SpacecraftViewer({ spacecraft, build }: SpacecraftViewerProps) {
         </div>
       )}
     </div>
+    {galleryOpen && onSelectSpacecraft && (
+      <Suspense
+        fallback={
+          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-[#030812] text-sm text-slate-300">
+            Preparing spacecraft gallery...
+          </div>
+        }
+      >
+        <SpacecraftOrbitGallery
+          selectedId={spacecraft.id}
+          selectedModel={currentState.status === 'ready' ? currentState.model : null}
+          onClose={() => setGalleryOpen(false)}
+          onSelect={(selected) => {
+            onSelectSpacecraft(selected)
+            setGalleryOpen(false)
+          }}
+        />
+      </Suspense>
+    )}
+    </>
   )
 }
