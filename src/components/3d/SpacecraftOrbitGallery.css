@@ -1,0 +1,170 @@
+.spacecraft-branch-layer {
+  --branch-color: #8cecff;
+  color: #f3f8fc;
+}
+
+.spacecraft-branch-svg {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.spacecraft-branch-path {
+  fill: none;
+  stroke-dasharray: 1;
+  stroke: var(--branch-color);
+  stroke-width: 1.15;
+  stroke-linecap: round;
+  opacity: 0.58;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--branch-color), transparent 55%));
+  transition: stroke-width 180ms ease, opacity 180ms ease;
+}
+
+.spacecraft-branch-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 16;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.spacecraft-branch-svg g.is-active .spacecraft-branch-path,
+.spacecraft-branch-label.is-active + .spacecraft-branch-path {
+  stroke-width: 1.8;
+  opacity: 0.95;
+}
+
+.spacecraft-branch-anchor,
+.spacecraft-branch-endpoint {
+  fill: var(--branch-color);
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--branch-color), transparent 30%));
+  opacity: 0;
+  pointer-events: none;
+}
+
+.spacecraft-branch-label {
+  position: absolute;
+  display: flex;
+  min-height: 38px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 4px;
+  margin-top: -19px;
+  padding: 4px 8px 4px 12px;
+  border: 0;
+  border-left: 1px solid color-mix(in srgb, var(--branch-color), transparent 12%);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 180ms ease, border-color 180ms ease;
+}
+
+.spacecraft-branch-label::before {
+  position: absolute;
+  top: 4px;
+  left: -2px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--branch-color);
+  box-shadow: 0 0 7px var(--branch-color);
+  content: '';
+}
+
+.spacecraft-branch-label:hover,
+.spacecraft-branch-label:focus-visible,
+.spacecraft-branch-label.is-active {
+  border-left-width: 2px;
+  border-left-color: var(--branch-color);
+  outline: none;
+}
+
+.spacecraft-branch-label:focus-visible {
+  text-shadow: 0 0 16px color-mix(in srgb, var(--branch-color), transparent 50%);
+}
+
+.spacecraft-branch-category {
+  color: color-mix(in srgb, var(--branch-color), #dbeafe 20%);
+  font: 600 9px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: 0.19em;
+  text-transform: uppercase;
+}
+
+.spacecraft-branch-label strong {
+  display: -webkit-box;
+  overflow: hidden;
+  color: rgb(248 250 252 / 95%);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.spacecraft-branch-detail {
+  max-width: 27ch;
+  color: rgb(203 213 225 / 82%);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.spacecraft-branch-instruction {
+  position: absolute;
+  bottom: 26px;
+  left: 50%;
+  margin: 0;
+  color: rgb(148 163 184 / 72%);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.spacecraft-selected-name {
+  color: rgb(248 250 252 / 92%);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.spacecraft-selected-agency {
+  margin-top: 3px;
+  color: rgb(148 163 184 / 78%);
+  font-size: 10px;
+}
+
+@media (max-width: 700px) {
+  .spacecraft-branch-label {
+    gap: 3px;
+    padding-left: 8px;
+  }
+
+  .spacecraft-branch-category {
+    font-size: 8px;
+    letter-spacing: 0.14em;
+  }
+
+  .spacecraft-branch-label strong {
+    font-size: 11px;
+  }
+
+  .spacecraft-branch-detail {
+    font-size: 10px;
+  }
+
+  .spacecraft-branch-instruction {
+    bottom: 82px;
+    font-size: 9px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spacecraft-branch-path,
+  .spacecraft-branch-label {
+    transition: none;
+  }
+}

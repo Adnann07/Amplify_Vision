@@ -5,6 +5,7 @@ import {
   AdditiveBlending,
   BackSide,
   Box3,
+  Camera,
   Color,
   Group,
   Mesh,
@@ -13,10 +14,15 @@ import {
   PerspectiveCamera,
   Vector3,
 } from 'three'
-import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { availableSpacecraftCatalog } from '../../data/spacecraft'
 import { loadSpacecraftModel, type LoadedModel } from './spacecraftModelLoader'
+import {
+  SpacecraftInformationBranches,
+  type SpacecraftBranchModelState,
+} from './SpacecraftInformationBranches'
+import './SpacecraftOrbitGallery.css'
 
 type AvailableSpacecraft = (typeof availableSpacecraftCatalog)[number]
 
@@ -33,6 +39,25 @@ interface GalleryCanvasBoundaryProps {
 
 interface GalleryCanvasBoundaryState {
   failed: boolean
+}
+
+const FOCUS_DURATION = 0.9
+const DIM_DURATION = 0.65
+
+function easeInOutCubic(t: number) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+}
+
+function stepToward(
+  current: number,
+  target: number,
+  delta: number,
+  duration: number,
+  instant: boolean,
+) {
+  if (instant) return target
+  const step = delta / duration
+  return current < target ? Math.min(target, current + step) : Math.max(target, current - step)
 }
 
 class GalleryCanvasBoundary extends Component<
@@ -88,6 +113,11 @@ function OrbitingModel({
   size,
   reducedMotion,
   highlighted,
+  focused,
+  dimmed,
+  portrait,
+  focusedModelRef,
+  branchModelRef,
   onHighlight,
   onSelect,
 }: {
@@ -97,10 +127,20 @@ function OrbitingModel({
   size: number
   reducedMotion: boolean
   highlighted: boolean
+  focused: boolean
+  dimmed: boolean
+  portrait: boolean
+  focusedModelRef: RefObject<Group | null>
+  branchModelRef: RefObject<SpacecraftBranchModelState>
   onHighlight: (id: string | null) => void
   onSelect: (spacecraft: AvailableSpacecraft) => void
 }) {
+  const rootRef = useRef<Group>(null)
   const orbitModelRef = useRef<Group>(null)
+  const [px, py, pz] = position
+  const orbit = useMemo(() => new Vector3(px, py, pz), [px, py, pz])
+  const progress = useRef({ focus: 0, dim: 0 })
+  const highlightScale = useRef(1)
   const fit = useMemo(() => {
     const detachedRoot = model.root.clone(true)
     const bounds = new Box3().setFromObject(detachedRoot)
@@ -109,7 +149,10 @@ function OrbitingModel({
     const dimensions = bounds.getSize(new Vector3())
     return {
       center,
+      dimensions,
       scale: size / Math.max(dimensions.x, dimensions.y, dimensions.z),
+      min: bounds.min.clone(),
+      max: bounds.max.clone(),
     }
   }, [model, size, spacecraft.name])
   const silhouette = useMemo(() => createSilhouette(model.root), [model])
@@ -135,43 +178,134 @@ function OrbitingModel({
 
   useEffect(() => () => silhouette.dispose(), [silhouette])
 
-  useFrame((_, delta) => {
+  useLayoutEffect(() => {
+    rootRef.current?.position.copy(orbit)
+  }, [orbit])
+
+  useLayoutEffect(() => {
+    const branchState = branchModelRef.current
     const group = orbitModelRef.current
-    if (!group || document.hidden) return
+    if (focused) {
+      focusedModelRef.current = group
+      const center = fit.center
+      const dimensions = fit.dimensions
+      const toAnchor = (x: number, y: number, z: number) =>
+        new Vector3(
+          (center.x + dimensions.x * x - center.x) * fit.scale,
+          (center.y + dimensions.y * y - center.y) * fit.scale,
+          (center.z + dimensions.z * z - center.z) * fit.scale,
+        )
+      const corners: Vector3[] = []
+      for (const x of [-0.5, 0.5]) {
+        for (const y of [-0.5, 0.5]) {
+          for (const z of [-0.5, 0.5]) corners.push(toAnchor(x, y, z))
+        }
+      }
+      branchState.group = group
+      branchState.anchors = [
+        toAnchor(0, 0, 0),
+        toAnchor(0.3, 0, 0),
+        toAnchor(-0.3, 0, 0),
+        toAnchor(0, 0.3, 0),
+        toAnchor(0, -0.3, 0),
+        toAnchor(0, 0, 0.3),
+      ]
+      branchState.bounds = corners
+    }
+    return () => {
+      if (focusedModelRef.current === group) focusedModelRef.current = null
+      if (branchState.group === group) {
+        branchState.group = null
+        branchState.anchors = []
+        branchState.bounds = []
+      }
+    }
+  }, [branchModelRef, fit, focused, focusedModelRef])
 
-    const targetScale = highlighted ? 1.08 : 1
-    if (reducedMotion) group.scale.setScalar(targetScale)
-    else group.scale.setScalar(group.scale.x + (targetScale - group.scale.x) * (1 - Math.exp(-delta * 6)))
+  useFrame((_, delta) => {
+    const root = rootRef.current
+    const group = orbitModelRef.current
+    if (!root || !group) return
 
-    group.rotation.y += delta * (reducedMotion ? 0.025 : 0.073)
+    progress.current.focus = stepToward(
+      progress.current.focus,
+      focused ? 1 : 0,
+      delta,
+      FOCUS_DURATION,
+      reducedMotion,
+    )
+    progress.current.dim = stepToward(
+      progress.current.dim,
+      dimmed ? 1 : 0,
+      delta,
+      DIM_DURATION,
+      reducedMotion,
+    )
+    const ef = easeInOutCubic(progress.current.focus)
+    const ed = easeInOutCubic(progress.current.dim)
 
-    const targetOpacity = highlighted ? 0.42 : 0
+    highlightScale.current +=
+      ((highlighted && !focused && !dimmed ? 1.08 : 1) - highlightScale.current) *
+      (reducedMotion ? 1 : 1 - Math.exp(-delta * 8))
+
+    const focusX = 0
+    const baseX = orbit.x * (1 + 0.35 * ed)
+    const baseY = orbit.y * (1 + 0.35 * ed)
+    const baseZ = orbit.z - 2 * ed
+    root.position.set(
+      baseX + (focusX - baseX) * ef,
+      baseY * (1 - ef),
+      baseZ * (1 - ef),
+    )
+
+    const focusScale = portrait ? 1.9 : 2.8
+    const scale =
+      (1 + (focusScale - 1) * ef) *
+      (1 - ed) *
+      (1 + (highlightScale.current - 1) * (1 - ef))
+    group.scale.setScalar(Math.max(scale, 0.0001))
+    root.visible = scale > 0.003
+
+    if (!focused || ef < 1) {
+      const baseSpin = reducedMotion ? 0.025 : 0.073 + (0.025 - 0.073) * ef
+      const flourish = reducedMotion ? 0 : Math.sin(Math.PI * ef) * 0.5
+      group.rotation.y += delta * (baseSpin + flourish)
+    }
+
+    const showHighlight = highlighted && !focused && !dimmed
+    const targetOpacity = showHighlight ? 0.42 : 0
     outlineOpacity.current += (targetOpacity - outlineOpacity.current) * (1 - Math.exp(-delta * 7))
     silhouette.materials.forEach((material) => {
       material.opacity = outlineOpacity.current
       material.visible = outlineOpacity.current > 0.01
     })
     emissiveMaterials.forEach(({ material, color, intensity }) => {
-      material.emissive.copy(color).lerp(highlightColor, highlighted ? 0.34 : 0)
-      material.emissiveIntensity = intensity + (highlighted ? 0.24 : 0)
+      material.emissive.copy(color).lerp(highlightColor, showHighlight ? 0.34 : 0)
+      material.emissiveIntensity = intensity + (showHighlight ? 0.24 : 0)
     })
   })
 
   return (
     <group
-      position={position}
+      ref={rootRef}
       onPointerOver={(event) => {
+        if (dimmed || focused) return
         event.stopPropagation()
         onHighlight(spacecraft.id)
       }}
       onPointerOut={(event) => {
+        if (dimmed || focused) return
         event.stopPropagation()
         onHighlight(null)
       }}
       onPointerDown={(event) => {
-        if (event.pointerType === 'touch') onHighlight(spacecraft.id)
+        if (dimmed) return
+        if (!focused && event.pointerType === 'touch') {
+          onHighlight(spacecraft.id)
+        }
       }}
       onClick={(event) => {
+        if (dimmed) return
         event.stopPropagation()
         onSelect(spacecraft)
       }}
@@ -194,13 +328,21 @@ function OrbitingModel({
 function OrbitingFleet({
   models,
   highlightedId,
+  selectedId,
   reducedMotion,
+  focusedModelRef,
+  branchModelRef,
+  cameraRef,
   onHighlight,
   onSelect,
 }: {
   models: Map<string, LoadedModel>
   highlightedId: string | null
+  selectedId: string | null
   reducedMotion: boolean
+  focusedModelRef: RefObject<Group | null>
+  branchModelRef: RefObject<SpacecraftBranchModelState>
+  cameraRef: RefObject<Camera | null>
   onHighlight: (id: string | null) => void
   onSelect: (spacecraft: AvailableSpacecraft) => void
 }) {
@@ -209,16 +351,44 @@ function OrbitingFleet({
   const radiusX = portrait ? 1.52 : 4.25
   const radiusY = portrait ? 2.62 : 2.1
   const modelSize = portrait ? 0.72 : 1.02
+  const fleetDistance = useRef(14)
+  const cameraProgress = useRef(0)
+
+  useLayoutEffect(() => {
+    cameraRef.current = camera
+    return () => {
+      if (cameraRef.current === camera) cameraRef.current = null
+    }
+  }, [camera, cameraRef])
 
   useLayoutEffect(() => {
     if (!(camera instanceof PerspectiveCamera)) return
     const aspect = Math.max(viewport.width / viewport.height, 0.1)
     const tangent = Math.tan((camera.fov * Math.PI) / 360)
     const fitDistance = Math.max(radiusX / (tangent * aspect), radiusY / tangent)
-    camera.position.set(0, 0, fitDistance * 1.22 + 0.8)
+    fleetDistance.current = fitDistance * 1.22 + 0.8
+  }, [camera, radiusX, radiusY, viewport.height, viewport.width])
+
+  useFrame((_, delta) => {
+    if (!(camera instanceof PerspectiveCamera)) return
+    cameraProgress.current = stepToward(
+      cameraProgress.current,
+      selectedId ? 1 : 0,
+      delta,
+      FOCUS_DURATION,
+      reducedMotion,
+    )
+    const e = easeInOutCubic(cameraProgress.current)
+    const focusDistance = portrait ? 7.4 : 6.2
+    const targetDistance = fleetDistance.current + (focusDistance - fleetDistance.current) * e
+    const z = reducedMotion
+      ? targetDistance
+      : camera.position.z + (targetDistance - camera.position.z) * (1 - Math.exp(-delta * 6))
+
+    camera.position.set(0, 0, z)
     camera.lookAt(0, 0, 0)
     camera.updateProjectionMatrix()
-  }, [camera, radiusX, radiusY, viewport.height, viewport.width])
+  })
 
   return (
     <>
@@ -248,6 +418,11 @@ function OrbitingFleet({
               size={modelSize}
               reducedMotion={reducedMotion}
               highlighted={highlightedId === spacecraft.id}
+              focused={selectedId === spacecraft.id}
+              dimmed={selectedId !== null && spacecraft.id !== selectedId}
+              portrait={portrait}
+              focusedModelRef={focusedModelRef}
+              branchModelRef={branchModelRef}
               onHighlight={onHighlight}
               onSelect={onSelect}
             />
@@ -282,10 +457,19 @@ export function SpacecraftOrbitGallery({
   const [loadErrors, setLoadErrors] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [highlightedId, setHighlightedId] = useState<string | null>(null)
+  const [selectedSpacecraftId, setSelectedSpacecraftId] = useState<string | null>(null)
   const [closing, setClosing] = useState(false)
   const [focusedId, setFocusedId] = useState<string | null>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
   const closeButtonRef = useRef<HTMLButtonElement>(null)
+  const focusedModelRef = useRef<Group | null>(null)
+  const branchModelRef = useRef<SpacecraftBranchModelState>({
+    group: null,
+    anchors: [],
+    bounds: [],
+  })
+  const cameraRef = useRef<Camera | null>(null)
+  const dragRef = useRef<{ pointerId: number; x: number; y: number } | null>(null)
   const closeTimer = useRef<number | null>(null)
   const callbacks = useRef({ onClose, onSelect })
   const reducedMotion = useReducedMotion()
@@ -367,7 +551,8 @@ export function SpacecraftOrbitGallery({
     closeButtonRef.current?.focus()
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        requestClose()
+        if (selectedSpacecraftId) setSelectedSpacecraftId(null)
+        else requestClose()
         return
       }
       if (event.key !== 'Tab') return
@@ -392,7 +577,11 @@ export function SpacecraftOrbitGallery({
       window.removeEventListener('keydown', onKeyDown)
       if (closeTimer.current !== null) window.clearTimeout(closeTimer.current)
     }
-  }, [requestClose])
+  }, [requestClose, selectedSpacecraftId])
+
+  const selectedSpacecraft = selectedSpacecraftId
+    ? availableSpacecraftCatalog.find((spacecraft) => spacecraft.id === selectedSpacecraftId) ?? null
+    : null
 
   const content = (
     <motion.div
@@ -419,15 +608,96 @@ export function SpacecraftOrbitGallery({
         >
           <OrbitingFleet
             models={models}
-            highlightedId={highlightedId ?? focusedId}
+            highlightedId={highlightedId ?? (selectedSpacecraftId ? null : focusedId)}
+            selectedId={selectedSpacecraftId}
             reducedMotion={Boolean(reducedMotion)}
+            focusedModelRef={focusedModelRef}
+            branchModelRef={branchModelRef}
+            cameraRef={cameraRef}
             onHighlight={setHighlight}
-            onSelect={requestClose}
+            onSelect={(spacecraft) => {
+              setHighlight(null)
+              setSelectedSpacecraftId(spacecraft.id)
+            }}
           />
         </Canvas>
       </GalleryCanvasBoundary>
 
+      {selectedSpacecraft && (
+        <div
+          aria-label="Drag to rotate the selected spacecraft"
+          className="absolute inset-0 z-10 cursor-grab touch-none"
+          onPointerDown={(event) => {
+            event.preventDefault()
+            event.currentTarget.setPointerCapture(event.pointerId)
+            dragRef.current = {
+              pointerId: event.pointerId,
+              x: event.clientX,
+              y: event.clientY,
+            }
+            event.currentTarget.style.cursor = 'grabbing'
+          }}
+          onPointerMove={(event) => {
+            const drag = dragRef.current
+            const model = focusedModelRef.current
+            if (!drag || drag.pointerId !== event.pointerId || !model) return
+            model.rotation.y += (event.clientX - drag.x) * 0.01
+            model.rotation.x = Math.max(
+              -Math.PI / 2,
+              Math.min(Math.PI / 2, model.rotation.x + (event.clientY - drag.y) * 0.01),
+            )
+            drag.x = event.clientX
+            drag.y = event.clientY
+          }}
+          onPointerUp={(event) => {
+            if (dragRef.current?.pointerId !== event.pointerId) return
+            dragRef.current = null
+            event.currentTarget.releasePointerCapture(event.pointerId)
+            event.currentTarget.style.cursor = 'grab'
+          }}
+          onPointerCancel={(event) => {
+            dragRef.current = null
+            event.currentTarget.style.cursor = 'grab'
+          }}
+        />
+      )}
+
+      {selectedSpacecraft && (
+        <SpacecraftInformationBranches
+          key={selectedSpacecraft.id}
+          spacecraft={selectedSpacecraft}
+          cameraRef={cameraRef}
+          modelRef={branchModelRef}
+          reducedMotion={Boolean(reducedMotion)}
+        />
+      )}
+
       {loading && <LoadingOrbit />}
+
+      {selectedSpacecraft && (
+        <>
+          <button
+            type="button"
+            onClick={() => setSelectedSpacecraftId(null)}
+            className="absolute left-5 top-5 z-20 rounded-full border border-white/20 bg-[#07121c]/75 px-4 py-2 text-xs font-medium text-white/80 backdrop-blur-sm transition hover:border-sky-200/55 hover:text-sky-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-sky-200 sm:left-8 sm:top-8"
+          >
+            ← All spacecraft
+          </button>
+          <div className="pointer-events-none absolute bottom-6 right-6 z-20 flex items-center gap-4 sm:bottom-8 sm:right-8">
+            <div className="hidden text-right sm:block">
+              <p className="spacecraft-selected-name">{selectedSpacecraft.name}</p>
+              <p className="spacecraft-selected-agency">{selectedSpacecraft.agency}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => requestClose(selectedSpacecraft)}
+              className="pointer-events-auto rounded-full border border-white/20 bg-[#07121c]/80 px-5 py-3 text-sm font-medium text-white/90 backdrop-blur-sm transition hover:border-sky-200/60 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-sky-200"
+            >
+              Choose model
+            </button>
+          </div>
+        </>
+      )}
 
       <button
         ref={closeButtonRef}
@@ -450,7 +720,7 @@ export function SpacecraftOrbitGallery({
             aria-pressed={spacecraft.id === selectedId}
             onFocus={() => setFocusedId(spacecraft.id)}
             onBlur={() => setFocusedId(null)}
-            onClick={() => requestClose(spacecraft)}
+            onClick={() => setSelectedSpacecraftId(spacecraft.id)}
           />
         ))}
       </div>
