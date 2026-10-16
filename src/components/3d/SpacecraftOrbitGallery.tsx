@@ -29,6 +29,9 @@ type AvailableSpacecraft = (typeof availableSpacecraftCatalog)[number]
 interface SpacecraftOrbitGalleryProps {
   selectedId: string
   selectedModel: LoadedModel | null
+  preloadedModels?: Map<string, LoadedModel>
+  initialLoadErrors?: string[]
+  onCanvasReady?: () => void
   onClose: () => void
   onSelect: (spacecraft: AvailableSpacecraft) => void
 }
@@ -42,6 +45,8 @@ interface GalleryCanvasBoundaryState {
 }
 
 const FOCUS_DURATION = 0.9
+const FOCUSED_MODEL_SCALE = 2.8
+const FOCUSED_MODEL_SCREEN_FRACTION = 0.76
 const DIM_DURATION = 0.65
 
 function easeInOutCubic(t: number) {
@@ -115,7 +120,6 @@ function OrbitingModel({
   highlighted,
   focused,
   dimmed,
-  portrait,
   focusedModelRef,
   branchModelRef,
   onHighlight,
@@ -129,7 +133,6 @@ function OrbitingModel({
   highlighted: boolean
   focused: boolean
   dimmed: boolean
-  portrait: boolean
   focusedModelRef: RefObject<Group | null>
   branchModelRef: RefObject<SpacecraftBranchModelState>
   onHighlight: (id: string | null) => void
@@ -258,9 +261,8 @@ function OrbitingModel({
       baseZ * (1 - ef),
     )
 
-    const focusScale = portrait ? 1.9 : 2.8
     const scale =
-      (1 + (focusScale - 1) * ef) *
+      (1 + (FOCUSED_MODEL_SCALE - 1) * ef) *
       (1 - ed) *
       (1 + (highlightScale.current - 1) * (1 - ef))
     group.scale.setScalar(Math.max(scale, 0.0001))
@@ -379,7 +381,13 @@ function OrbitingFleet({
       reducedMotion,
     )
     const e = easeInOutCubic(cameraProgress.current)
-    const focusDistance = portrait ? 7.4 : 6.2
+    const aspect = Math.max(viewport.width / viewport.height, 0.1)
+    const verticalHalfFov = (camera.fov * Math.PI) / 360
+    const horizontalHalfFov = Math.atan(Math.tan(verticalHalfFov) * aspect)
+    const limitingHalfFov = Math.min(verticalHalfFov, horizontalHalfFov)
+    const focusedModelSize = (portrait ? 0.72 : 1.02) * FOCUSED_MODEL_SCALE
+    const focusDistance =
+      focusedModelSize / (2 * Math.tan(limitingHalfFov) * FOCUSED_MODEL_SCREEN_FRACTION)
     const targetDistance = fleetDistance.current + (focusDistance - fleetDistance.current) * e
     const z = reducedMotion
       ? targetDistance
@@ -420,7 +428,6 @@ function OrbitingFleet({
               highlighted={highlightedId === spacecraft.id}
               focused={selectedId === spacecraft.id}
               dimmed={selectedId !== null && spacecraft.id !== selectedId}
-              portrait={portrait}
               focusedModelRef={focusedModelRef}
               branchModelRef={branchModelRef}
               onHighlight={onHighlight}
@@ -448,14 +455,17 @@ function LoadingOrbit() {
 export function SpacecraftOrbitGallery({
   selectedId,
   selectedModel,
+  preloadedModels,
+  initialLoadErrors,
+  onCanvasReady,
   onClose,
   onSelect,
 }: SpacecraftOrbitGalleryProps) {
   const [models, setModels] = useState<Map<string, LoadedModel>>(
-    () => selectedModel ? new Map([[selectedId, selectedModel]]) : new Map(),
+    () => preloadedModels ?? (selectedModel ? new Map([[selectedId, selectedModel]]) : new Map()),
   )
-  const [loadErrors, setLoadErrors] = useState<string[]>([])
-  const [loading, setLoading] = useState(true)
+  const [loadErrors, setLoadErrors] = useState<string[]>(initialLoadErrors ?? [])
+  const [loading, setLoading] = useState(!preloadedModels)
   const [highlightedId, setHighlightedId] = useState<string | null>(null)
   const [selectedSpacecraftId, setSelectedSpacecraftId] = useState<string | null>(null)
   const [closing, setClosing] = useState(false)
@@ -471,6 +481,7 @@ export function SpacecraftOrbitGallery({
   const cameraRef = useRef<Camera | null>(null)
   const dragRef = useRef<{ pointerId: number; x: number; y: number } | null>(null)
   const closeTimer = useRef<number | null>(null)
+  const preloadedDisposeTimer = useRef<number | null>(null)
   const callbacks = useRef({ onClose, onSelect })
   const reducedMotion = useReducedMotion()
 
@@ -496,6 +507,20 @@ export function SpacecraftOrbitGallery({
   }, [])
 
   useEffect(() => {
+    if (preloadedModels) {
+      if (preloadedDisposeTimer.current !== null) {
+        window.clearTimeout(preloadedDisposeTimer.current)
+        preloadedDisposeTimer.current = null
+      }
+      const ownedModels = [...preloadedModels.values()].filter((model) => model !== selectedModel)
+      return () => {
+        preloadedDisposeTimer.current = window.setTimeout(() => {
+          ownedModels.forEach((model) => model.dispose())
+          preloadedDisposeTimer.current = null
+        }, 0)
+      }
+    }
+
     let cancelled = false
     let cursor = 0
     const ownedModels = new Set<LoadedModel>()
@@ -542,7 +567,7 @@ export function SpacecraftOrbitGallery({
       cancelled = true
       ownedModels.forEach((model) => model.dispose())
     }
-  }, [selectedId, selectedModel])
+  }, [initialLoadErrors, preloadedModels, selectedId, selectedModel])
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow
@@ -595,7 +620,7 @@ export function SpacecraftOrbitGallery({
       data-highlighted-model={highlightedId ?? focusedId ?? ''}
       initial={reducedMotion ? false : { opacity: 0 }}
       animate={{ opacity: closing ? 0 : 1 }}
-      transition={{ duration: reducedMotion ? 0 : 0.22, ease: 'easeOut' }}
+      transition={{ duration: reducedMotion ? 0 : 0.72, ease: 'easeInOut' }}
       onPointerLeave={() => setHighlight(null)}
     >
       <GalleryCanvasBoundary>
@@ -604,6 +629,7 @@ export function SpacecraftOrbitGallery({
           camera={{ position: [0, 0, 8], fov: 48 }}
           dpr={[1, 1.25]}
           gl={{ alpha: false, antialias: true, powerPreference: 'low-power' }}
+          onCreated={onCanvasReady}
           onPointerMissed={() => setHighlight(null)}
         >
           <OrbitingFleet

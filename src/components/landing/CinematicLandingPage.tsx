@@ -121,7 +121,7 @@ export function CinematicLandingPage({ onEnter }: { onEnter: () => void }) {
   return (
     <main className="cinematic-landing">
       <header className="landing-nav">
-        <a className="landing-wordmark" href="/" aria-label="Amplify Vision home">
+        <a className="landing-wordmark" href="#top" aria-label="Amplify Vision home">
           <span className="landing-wordmark-symbol" aria-hidden="true">A</span>
           <span>AMPLIFY<strong>VISION</strong></span>
         </a>

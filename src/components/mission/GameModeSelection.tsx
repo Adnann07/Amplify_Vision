@@ -13,15 +13,21 @@ interface HomeScreenProps {
   onMissionMode: () => void
   onFreeplayMode: () => void
   onLiveEvents: () => void
+  onJunoSimulation: () => void
 }
 
-export function HomeScreen({ onMissionMode, onFreeplayMode, onLiveEvents }: HomeScreenProps) {
+export function HomeScreen({
+  onMissionMode,
+  onFreeplayMode,
+  onLiveEvents,
+  onJunoSimulation,
+}: HomeScreenProps) {
   return (
-    <main className="relative isolate flex min-h-screen items-center justify-center overflow-hidden bg-[#020912] px-4 py-12 text-slate-100 sm:px-6">
-      <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_20%_30%,rgba(14,116,144,0.22),transparent_42%),radial-gradient(ellipse_at_82%_72%,rgba(30,64,175,0.18),transparent_44%)]" />
+    <main className="relative isolate flex min-h-screen items-center justify-center overflow-hidden bg-black px-4 py-12 text-slate-100 sm:px-6">
+      <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_50%_0%,rgba(255,255,255,0.08),transparent_52%)]" />
       <section className="w-full max-w-6xl">
         <header className="mb-10 text-center">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.38em] text-sky-300">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.38em] text-white/70">
             Space mission engineering simulator
           </p>
           <h1 className="mt-4 text-4xl font-semibold tracking-[-0.06em] text-white sm:text-6xl">
@@ -32,20 +38,20 @@ export function HomeScreen({ onMissionMode, onFreeplayMode, onLiveEvents }: Home
           </p>
         </header>
 
-        <div className="grid gap-5 md:grid-cols-3">
+        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
           <button
             type="button"
             onClick={onMissionMode}
-            className="group rounded-[28px] border border-sky-300/25 bg-slate-900/80 p-6 text-left shadow-[0_20px_70px_rgba(2,132,199,0.08)] transition hover:-translate-y-1 hover:border-sky-200/55 hover:bg-slate-900 sm:p-8"
+            className="group rounded-[28px] border border-white/15 bg-[#090909] p-6 text-left transition hover:-translate-y-1 hover:border-white/50 hover:bg-[#101010] sm:p-8"
           >
-            <span className="inline-flex rounded-full border border-sky-300/25 bg-sky-300/10 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-sky-100">
+            <span className="inline-flex rounded-full border border-white/25 bg-white/5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-white">
               Guided campaign
             </span>
             <h2 className="mt-5 text-2xl font-semibold text-white">Mission Mode</h2>
             <p className="mt-3 text-sm leading-relaxed text-slate-300">
               Take on engineering challenges, complete objectives, and progress through an expanding space exploration campaign.
             </p>
-            <span className="mt-7 inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-sky-200">
+            <span className="mt-7 inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-white">
               View mission campaign <span aria-hidden="true">→</span>
             </span>
           </button>
@@ -53,16 +59,16 @@ export function HomeScreen({ onMissionMode, onFreeplayMode, onLiveEvents }: Home
           <button
             type="button"
             onClick={onFreeplayMode}
-            className="group rounded-[28px] border border-violet-300/20 bg-slate-900/80 p-6 text-left transition hover:-translate-y-1 hover:border-violet-200/50 hover:bg-slate-900 sm:p-8"
+            className="group rounded-[28px] border border-white/15 bg-[#090909] p-6 text-left transition hover:-translate-y-1 hover:border-white/50 hover:bg-[#101010] sm:p-8"
           >
-            <span className="inline-flex rounded-full border border-violet-300/25 bg-violet-300/10 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-violet-100">
+            <span className="inline-flex rounded-full border border-white/25 bg-white/5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-white">
               Open sandbox
             </span>
             <h2 className="mt-5 text-2xl font-semibold text-white">Freeplay Mode</h2>
             <p className="mt-3 text-sm leading-relaxed text-slate-300">
               Design your own spacecraft, experiment with engineering trade-offs, and launch without mission objectives or campaign restrictions.
             </p>
-            <span className="mt-7 inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-violet-200">
+            <span className="mt-7 inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-white">
               Enter freeplay <span aria-hidden="true">→</span>
             </span>
           </button>
@@ -70,17 +76,35 @@ export function HomeScreen({ onMissionMode, onFreeplayMode, onLiveEvents }: Home
           <button
             type="button"
             onClick={onLiveEvents}
-            className="group rounded-[28px] border border-emerald-300/20 bg-slate-900/80 p-6 text-left transition hover:-translate-y-1 hover:border-emerald-200/50 hover:bg-slate-900 sm:p-8"
+            className="group rounded-[28px] border border-white/15 bg-[#090909] p-6 text-left transition hover:-translate-y-1 hover:border-white/50 hover:bg-[#101010] sm:p-8"
           >
-            <span className="inline-flex rounded-full border border-emerald-300/25 bg-emerald-300/10 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-100">
+            <span className="inline-flex rounded-full border border-white/25 bg-white/5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-white">
               NOAA · NASA · JPL
             </span>
             <h2 className="mt-5 text-2xl font-semibold text-white">Live Events</h2>
             <p className="mt-3 text-sm leading-relaxed text-slate-300">
               Explore current space-weather alerts, Earth events, and asteroid close approaches. Turn eligible records into clearly labeled design exercises.
             </p>
-            <span className="mt-7 inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-emerald-200">
+            <span className="mt-7 inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-white">
               Open live event board <span aria-hidden="true">→</span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onJunoSimulation}
+            className="group rounded-[28px] border border-cyan-200/20 bg-[#07111d] p-6 text-left transition hover:-translate-y-1 hover:border-cyan-100/50 hover:bg-[#0a1724] sm:p-8"
+          >
+            <span className="inline-flex rounded-full border border-cyan-200/25 bg-cyan-200/5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-100">
+              Jupiter · JPL Horizons
+            </span>
+            <h2 className="mt-5 text-2xl font-semibold text-white">Juno Orbital Simulation</h2>
+            <p className="mt-3 text-sm leading-relaxed text-slate-300">
+              Watch Juno move around Jupiter using Horizons ephemeris vectors, with a labeled
+              approximate-orbit fallback.
+            </p>
+            <span className="mt-7 inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-cyan-100">
+              Open orbital simulation <span aria-hidden="true">→</span>
             </span>
           </button>
         </div>

@@ -5,6 +5,7 @@ import { createSpaceWeatherHandler, createSpaceWeatherService } from './server/s
 import { createMissionControlHandler } from './server/mission-control.mjs'
 import { createObservationImageryHandler } from './server/observation-imagery.mjs'
 import { createRealTimeEventsHandler, createRealTimeEventsService } from './server/real-time-events.mjs'
+import { createJunoTrajectoryHandler } from './server/juno-trajectory.mjs'
 
 const spaceWeatherService = createSpaceWeatherService()
 const missionControlHandler = createMissionControlHandler({
@@ -15,6 +16,7 @@ const spaceWeatherHandler = createSpaceWeatherHandler({ service: spaceWeatherSer
 const realTimeEventsHandler = createRealTimeEventsHandler({
   service: createRealTimeEventsService({ spaceWeatherService }),
 })
+const junoTrajectoryHandler = createJunoTrajectoryHandler()
 
 function missionControlApi(): Plugin {
   return {
@@ -76,8 +78,23 @@ function observationImageryApi(): Plugin {
   }
 }
 
+function junoTrajectoryApi(): Plugin {
+  return {
+    name: 'juno-trajectory-api',
+    configureServer(server) {
+      server.middlewares.use((request, response, next) => {
+        if (new URL(request.url ?? '/', 'http://vite.local').pathname !== '/api/juno-trajectory') {
+          next()
+          return
+        }
+        void junoTrajectoryHandler(request, response)
+      })
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss(), missionControlApi(), spaceWeatherApi(), realTimeEventsApi(), observationImageryApi()],
+  plugins: [react(), tailwindcss(), missionControlApi(), spaceWeatherApi(), realTimeEventsApi(), observationImageryApi(), junoTrajectoryApi()],
   server: {
     proxy: {
       '/api/horizons': {

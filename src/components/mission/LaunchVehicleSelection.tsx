@@ -2,6 +2,7 @@ import type { LaunchRecord, LaunchVehicleSpec } from '../../data/launchVehicles'
 import { assessLaunchOutcome } from '../../data/launchOutcome'
 import { lazy, Suspense, useCallback, useState } from 'react'
 import type { MissionRequirementResult } from '../../data/missionGoals'
+import { resolveFlightDestination } from './missionFlightPath'
 
 const LaunchVehiclePreview = lazy(() =>
   import('./LaunchVehiclePreview').then((module) => ({ default: module.LaunchVehiclePreview })),
@@ -17,6 +18,7 @@ interface LaunchVehicleSelectionProps {
   onSelectVehicle: (vehicleId: string) => void
   onReturnToBuilder: () => void
   onLaunch: (vehicle: LaunchVehicleSpec) => void
+  onDemoMission: (vehicle: LaunchVehicleSpec) => void
   spacecraftName: string
   spacecraftMassKg: number
   existingMissionCostMillions: number
@@ -35,6 +37,7 @@ interface LaunchResultsProps {
   onMissionFailure: () => void
   onStartMissionSimulation: () => void
   onEnterMissionControl: () => void
+  startInDemoMode: boolean
 }
 
 function formatCurrency(value: number) {
@@ -48,6 +51,7 @@ export function LaunchVehicleSelection({
   onSelectVehicle,
   onReturnToBuilder,
   onLaunch,
+  onDemoMission,
   spacecraftName,
   spacecraftMassKg,
   existingMissionCostMillions,
@@ -69,8 +73,19 @@ export function LaunchVehicleSelection({
     .filter((requirement) => requirement.id !== 'maxBudget')
     .every((requirement) => requirement.passed)
   const missionAtRisk = mode === 'mission' && (!requirementsReady || !selectedVehicleAffordable)
+  const requirementValues = {
+    availableDeltaV: missionRequirements.find((requirement) => requirement.id === 'deltaV')?.actual ?? 0,
+    requiredDeltaV: missionRequirements.find((requirement) => requirement.id === 'deltaV')?.target ?? 0,
+    availablePowerW: missionRequirements.find((requirement) => requirement.id === 'power')?.actual ?? 0,
+    requiredPowerW: missionRequirements.find((requirement) => requirement.id === 'power')?.target ?? 0,
+    availableCommunication: missionRequirements.find((requirement) => requirement.id === 'communication')?.actual ?? 0,
+    requiredCommunication: missionRequirements.find((requirement) => requirement.id === 'communication')?.target ?? 0,
+    availableInstruments: missionRequirements.find((requirement) => requirement.id === 'instruments')?.actual ?? 0,
+    requiredInstruments: missionRequirements.find((requirement) => requirement.id === 'instruments')?.target ?? 0,
+    maxMassKg: missionRequirements.find((requirement) => requirement.id === 'maxMass')?.target ?? undefined,
+  }
   const risk = selectedVehicle
-    ? assessLaunchOutcome(spacecraftMassKg, spacecraftReliability, selectedVehicle)
+    ? assessLaunchOutcome(spacecraftMassKg, spacecraftReliability, selectedVehicle, requirementValues)
     : null
 
   return (
@@ -274,10 +289,10 @@ export function LaunchVehicleSelection({
                   )}
                   <p className="text-slate-300">
                     {mode === 'freeplay'
-                      ? 'Freeplay risk estimates are advisory. Payload and spacecraft reliability determine launch risk; the exact outcome remains hidden until liftoff.'
+                      ? 'Freeplay risk estimates are advisory. Payload capacity determines launch feasibility; spacecraft reliability and mission constraints affect operations after deployment.'
                       : missionAtRisk
-                        ? 'Mission constraints are at risk, but a launch can still be attempted. Launch outcome is based on payload and spacecraft reliability.'
-                        : 'Mission constraints are on target. Launch risk is based on payload and spacecraft reliability; the exact outcome is not revealed before liftoff.'}
+                        ? 'Mission constraints are at risk, but a launch can still be attempted. Only exceeding the selected rocket’s payload capacity prevents deployment.'
+                        : 'Mission constraints are on target. Launch feasibility is based on the selected rocket’s payload capacity; spacecraft performance is assessed after deployment.'}
                   </p>
                 </div>
               )}
@@ -290,6 +305,14 @@ export function LaunchVehicleSelection({
                 className="rounded-xl bg-emerald-300 px-4 py-3 text-xs font-bold uppercase tracking-[0.15em] text-slate-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
               >
                 Attempt Launch
+              </button>
+              <button
+                type="button"
+                disabled={!selectedVehicle}
+                onClick={() => selectedVehicle && onDemoMission(selectedVehicle)}
+                className="rounded-xl border border-sky-300/30 bg-sky-300/10 px-4 py-3 text-xs font-bold uppercase tracking-[0.15em] text-sky-100 transition hover:bg-sky-300/15 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-slate-800 disabled:text-slate-500"
+              >
+                Demo mission
               </button>
               <button
                 type="button"
@@ -314,26 +337,64 @@ export function LaunchResults({
   onMissionFailure,
   onStartMissionSimulation,
   onEnterMissionControl,
+  startInDemoMode,
 }: LaunchResultsProps) {
-  const [completedAttemptId, setCompletedAttemptId] = useState<number | null>(null)
-  const sequenceComplete = completedAttemptId === record.attemptId
+  const [showSuccessDemo, setShowSuccessDemo] = useState(startInDemoMode)
+  const [completedSequenceKey, setCompletedSequenceKey] = useState<string | null>(null)
+  const sequenceKey = `${record.attemptId}:${showSuccessDemo ? 'success-demo' : 'actual'}`
+  const sequenceRecord: LaunchRecord = showSuccessDemo
+    ? {
+        ...record,
+        outcome: 'success',
+        failureCategory: null,
+        failureTitle: null,
+        failureCause: null,
+        failureParameter: null,
+        failureActual: null,
+        failureExpected: null,
+        suggestedChange: null,
+        commanderMessage: null,
+      }
+    : record
+  const sequenceComplete = completedSequenceKey === sequenceKey
   const completeSequence = useCallback(() => {
-    setCompletedAttemptId(record.attemptId)
-  }, [record.attemptId])
+    setCompletedSequenceKey(sequenceKey)
+  }, [sequenceKey])
   const failed = record.outcome === 'failure'
+  const missionIssue = !failed && record.failureTitle !== null
+  const missionProfile = record.planningSnapshot.missionProfile ??
+    (record.destination.toLocaleLowerCase().includes('asteroid') ? 'planning' : 'orbiter')
+  const configuredDestination = resolveFlightDestination(
+    record.planningSnapshot.destinationId,
+    record.planningSnapshot.destinationBodyId,
+    record.destination,
+  )
+  const sequenceOutcomeTitle = showSuccessDemo
+    ? sequenceComplete
+      ? configuredDestination && missionProfile === 'orbiter'
+        ? `DEMO MISSION SUCCESSFUL · STABLE ORBIT AROUND ${configuredDestination.name.toLocaleUpperCase()}`
+        : configuredDestination && missionProfile === 'flyby'
+          ? `DEMO MISSION SUCCESSFUL · FLYBY COMPLETE AT ${configuredDestination.name.toLocaleUpperCase()}`
+          : 'DEMO MISSION SUCCESSFUL · SPACECRAFT DEPLOYED'
+      : 'Demo mission in progress'
+    : sequenceComplete
+      ? failed
+        ? `LAUNCH FAILED — ${record.failureTitle}`
+        : missionIssue
+          ? `LAUNCH SUCCESSFUL · MISSION FAILED IN SPACE — ${record.failureTitle}`
+          : !configuredDestination || missionProfile === 'planning'
+            ? 'LAUNCH SUCCESSFUL · DESTINATION NOT CONFIGURED'
+            : missionProfile === 'flyby'
+              ? `FLYBY COMPLETE · ${record.destination} · LAUNCH SUCCESSFUL`
+              : `STABLE ORBIT AROUND ${configuredDestination.name.toLocaleUpperCase()} · LAUNCH SUCCESSFUL`
+      : 'Launch and mission sequence in progress'
 
   return (
     <section className={`rounded-[30px] border ${failed ? 'border-rose-300/20' : 'border-emerald-300/20'} bg-slate-900/80 p-5 shadow-[0_15px_55px_rgba(15,23,42,0.45)] sm:p-8`}>
       <p className={`text-[10px] font-semibold uppercase tracking-[0.3em] ${failed ? 'text-rose-200/80' : 'text-emerald-200/80'}`}>
         Launch results
       </p>
-      <h2 className="mt-2 text-2xl font-semibold text-white sm:text-3xl">
-        {sequenceComplete
-          ? failed
-            ? `MISSION FAILED — ${record.failureTitle}`
-            : 'SPACECRAFT DEPLOYED · LAUNCH SUCCESSFUL'
-          : 'Launch sequence in progress'}
-      </h2>
+      <h2 className="mt-2 text-2xl font-semibold text-white sm:text-3xl">{sequenceOutcomeTitle}</h2>
       <p className="mt-2 text-sm text-slate-300">
         {record.missionName} · {record.destination} · {record.launchVehicle.name}
       </p>
@@ -362,9 +423,14 @@ export function LaunchResults({
             </div>
           }
         >
-          <LaunchSequence key={record.attemptId} record={record} onComplete={completeSequence} />
+          <LaunchSequence key={sequenceKey} record={sequenceRecord} onComplete={completeSequence} />
         </Suspense>
       </div>
+      {showSuccessDemo && (
+        <p className="mt-3 rounded-lg border border-sky-300/20 bg-sky-300/5 px-3 py-2 text-center text-xs text-sky-100" role="status">
+          Demonstration only: spacecraft optimization checks are ignored for this animation. The actual mission result and configuration are unchanged.
+        </p>
+      )}
       <p className="mt-2 text-center text-[10px] text-slate-500">
         NASA SLS Block 1: NASA-3D-Resources contributor model loaded from its original STL mesh.
         {' '}
@@ -397,10 +463,22 @@ export function LaunchResults({
 
       {sequenceComplete && (
         <>
-          {failed ? (
+          {showSuccessDemo ? (
+            <section className="mt-5 rounded-2xl border border-sky-300/20 bg-sky-300/5 p-4">
+              <h3 className="text-sm font-bold uppercase tracking-[0.12em] text-sky-100">
+                Successful mission demonstration
+              </h3>
+              <p className="mt-2 text-sm text-slate-200">
+                This demo shows liftoff, spacecraft deployment, and a successful journey to the configured destination without applying spacecraft optimization failures.
+              </p>
+              <p className="mt-2 text-xs text-slate-300">
+                It is a visual demonstration only and does not change the recorded launch outcome, mission assessment, or campaign progress.
+              </p>
+            </section>
+          ) : failed ? (
             <section className="mt-5 rounded-2xl border border-rose-300/25 bg-rose-300/5 p-4" aria-labelledby="failure-report-title">
               <h3 id="failure-report-title" className="text-sm font-bold uppercase tracking-[0.12em] text-rose-100">
-                MISSION FAILED — {record.failureTitle}
+                LAUNCH FAILURE — {record.failureTitle}
               </h3>
               <p className="mt-2 text-sm text-slate-200">{record.failureCause}</p>
               <dl className="mt-4 grid gap-3 sm:grid-cols-3">
@@ -425,6 +503,28 @@ export function LaunchResults({
               </p>
               <p className="mt-3 text-sm font-semibold text-amber-100">
                 Suggested change: {record.suggestedChange}
+              </p>
+            </section>
+          ) : missionIssue ? (
+            <section className="mt-5 rounded-2xl border border-amber-300/25 bg-amber-300/5 p-4" aria-labelledby="mission-risk-title">
+              <h3 id="mission-risk-title" className="text-sm font-bold uppercase tracking-[0.12em] text-amber-100">
+                IN-FLIGHT MISSION FAILURE — {record.failureTitle}
+              </h3>
+              <p className="mt-2 text-sm text-slate-200">{record.failureCause}</p>
+              <dl className="mt-4 grid gap-3 sm:grid-cols-3">
+                {[
+                  [record.failureParameter ?? 'Parameter', record.failureActual ?? '—'],
+                  ['Expected requirement', record.failureExpected ?? '—'],
+                  ['Suggested change', record.suggestedChange ?? 'Review spacecraft design'],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-xl border border-white/8 bg-slate-950/35 p-3">
+                    <dt className="text-[10px] uppercase tracking-[0.15em] text-slate-400">{label}</dt>
+                    <dd className="mt-1 text-sm font-medium text-white">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+              <p className="mt-4 border-l-2 border-amber-300/50 pl-3 text-sm leading-relaxed text-slate-200">
+                Launch and deployment succeeded. The spacecraft mission failed in space because of this issue; the spacecraft was not destroyed.
               </p>
             </section>
           ) : (
@@ -480,7 +580,7 @@ export function LaunchResults({
               ['Spacecraft launch mass', `${record.spacecraftMassKg.toLocaleString()} kg`],
               ['Spacecraft reliability', `${record.spacecraftReliability}%`],
               ['Rocket payload capacity', `${record.launchVehicle.payloadCapacityKg.toLocaleString()} kg`],
-              ['Estimated launch risk', record.riskLevel],
+              ['Estimated design risk', record.riskLevel],
               ['Launch cost', formatCurrency(record.launchVehicle.launchCostMillions)],
               [record.mode === 'freeplay' ? 'Configuration cost' : 'Total mission cost', formatCurrency(record.totalMissionCostMillions)],
               [record.mode === 'freeplay' ? 'Spending target' : 'Mission budget', formatCurrency(record.missionBudgetMillions)],
@@ -492,7 +592,7 @@ export function LaunchResults({
             ))}
           </dl>
 
-          {record.mode === 'mission' && !failed && (
+          {record.mode === 'mission' && !failed && !showSuccessDemo && (
             <button
               type="button"
               onClick={onStartMissionSimulation}
@@ -501,7 +601,7 @@ export function LaunchResults({
               Continue to mission systems assessment
             </button>
           )}
-          {sequenceComplete && !failed && (
+          {sequenceComplete && !failed && !showSuccessDemo && (
             <button
               type="button"
               onClick={onEnterMissionControl}
@@ -510,7 +610,7 @@ export function LaunchResults({
               Enter Mission Control · {record.missionName} / {record.spacecraftName}
             </button>
           )}
-          {sequenceComplete && failed && record.mode === 'mission' && (
+          {sequenceComplete && failed && record.mode === 'mission' && !showSuccessDemo && (
             <button
               type="button"
               onClick={onMissionFailure}
@@ -521,6 +621,17 @@ export function LaunchResults({
           )}
           {sequenceComplete && (
             <div className="mt-3 grid gap-2 sm:grid-cols-3">
+              {(failed || missionIssue || showSuccessDemo) && (
+                <button
+                  type="button"
+                  onClick={() => setShowSuccessDemo((current) => !current)}
+                  className="rounded-xl border border-sky-300/30 bg-sky-300/10 px-4 py-3 text-xs font-semibold uppercase tracking-[0.12em] text-sky-100 transition hover:bg-sky-300/15 sm:col-span-3"
+                >
+                  {showSuccessDemo
+                    ? 'Return to actual mission outcome'
+                    : 'Demo mission · ignore spacecraft optimization'}
+                </button>
+              )}
               <button type="button" onClick={() => onRetry(record.launchVehicle)} className="rounded-xl bg-emerald-300 px-4 py-3 text-xs font-bold uppercase tracking-[0.12em] text-slate-950 transition hover:bg-emerald-200">
                 Retry Launch
               </button>

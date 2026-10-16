@@ -19,7 +19,7 @@ interface AvatarProps {
 }
 
 function AstronautAvatar({ path }: AvatarProps) {
-  const { scene } = useGLTF(path)
+  const { scene } = useGLTF(path, `${import.meta.env.BASE_URL}draco/`)
 
   return (
     <Bounds fit clip margin={0.95}>

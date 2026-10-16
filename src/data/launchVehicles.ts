@@ -54,6 +54,16 @@ export const launchVehicles: LaunchVehicleSpec[] = [
   },
 ]
 
+export type LaunchFailureCategory =
+  | 'launch'
+  | 'mission'
+  | 'deployment'
+  | 'communication'
+  | 'power'
+  | 'trajectory'
+  | 'science'
+  | 'system'
+
 export interface LaunchRecord {
   attemptId: number
   mode: 'mission' | 'freeplay'
@@ -62,6 +72,8 @@ export interface LaunchRecord {
   planningSnapshot: {
     launchDate: string
     destinationBodyId: string | null
+    destinationId?: string
+    missionProfile?: 'orbiter' | 'flyby' | 'planning'
     ephemerides: HorizonsPosition[]
     transferEstimate: PreliminaryTransferEstimate | null
   }
@@ -88,6 +100,7 @@ export interface LaunchRecord {
   }
   missionRequirementResults: MissionRequirementResult[]
   outcome: 'success' | 'failure'
+  failureCategory: LaunchFailureCategory | null
   riskLevel: 'Low' | 'Moderate' | 'High'
   riskScore: number
   failureTitle: string | null

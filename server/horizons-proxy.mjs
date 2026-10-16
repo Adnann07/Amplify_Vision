@@ -7,6 +7,7 @@ import { createSpaceWeatherHandler, createSpaceWeatherService } from './space-we
 import { createMissionControlHandler } from './mission-control.mjs'
 import { createObservationImageryHandler } from './observation-imagery.mjs'
 import { createRealTimeEventsHandler, createRealTimeEventsService } from './real-time-events.mjs'
+import { createJunoTrajectoryHandler } from './juno-trajectory.mjs'
 
 const projectRoot = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const distributionRoot = resolve(projectRoot, 'dist')
@@ -20,6 +21,7 @@ const spaceWeatherHandler = createSpaceWeatherHandler({ service: spaceWeatherSer
 const realTimeEventsHandler = createRealTimeEventsHandler({
   service: createRealTimeEventsService({ spaceWeatherService }),
 })
+const junoTrajectoryHandler = createJunoTrajectoryHandler()
 const mimeTypes = new Map([
   ['.css', 'text/css; charset=utf-8'],
   ['.glb', 'model/gltf-binary'],
@@ -57,6 +59,10 @@ const server = createServer(async (request, response) => {
   }
   if (url.pathname === '/api/horizons') {
     await proxyHorizons(request, response, url)
+    return
+  }
+  if (url.pathname === '/api/juno-trajectory') {
+    await junoTrajectoryHandler(request, response)
     return
   }
 

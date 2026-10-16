@@ -49,6 +49,7 @@ function createRecord(overrides: Partial<LaunchRecord> = {}): LaunchRecord {
     },
     missionRequirementResults: [],
     outcome: 'success',
+    failureCategory: null,
     riskLevel: 'Low',
     riskScore: 10,
     failureTitle: null,

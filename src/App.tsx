@@ -51,7 +51,6 @@ import {
 } from './components/mission/CampaignPerformanceReport'
 import { SolarSystemPlanner } from './components/mission/SolarSystemPlanner'
 import { loadSolarSystemPositions, type HorizonsPosition } from './data/horizonsService'
-import { heliocentricBodies } from './data/planetaryData'
 import { estimateHohmannTransfer } from './data/missionPlanner'
 import {
   advanceMissionControl,
@@ -63,7 +62,15 @@ import {
 } from './data/missionControlSimulation'
 
 type GameMode = 'mission' | 'freeplay'
-type EntryScreen = 'home' | 'campaign' | 'events' | 'briefing' | 'builder'
+type EntryScreen =
+  | 'home'
+  | 'campaign'
+  | 'events'
+  | 'briefing'
+  | 'builder'
+  | 'freeplay-warp'
+  | 'freeplay-catalog'
+  | 'juno-orbit'
 type BriefingOrigin = 'campaign' | 'builder'
 type LaunchScreen =
   | 'builder'
@@ -74,6 +81,17 @@ type LaunchScreen =
   | 'mission-control'
   | 'mission-overview'
 
+type AppNavigationEntry =
+  | { kind: 'sentinel' }
+  | {
+      kind: 'page'
+      entryScreen: EntryScreen
+      launchScreen: LaunchScreen
+      showCinematicLanding: boolean
+    }
+
+const APP_NAVIGATION_STATE_KEY = 'amplifyVisionNavigation'
+
 interface CampaignState {
   progress: CampaignProgress
   storageWarning: string | null
@@ -83,6 +101,21 @@ type StoredCampaignEvaluation = CampaignEvaluation & { previousBestScore: number
 
 const SpacecraftViewer = lazy(() =>
   import('./components/3d/SpacecraftViewer').then((module) => ({ default: module.SpacecraftViewer })),
+)
+const SpacecraftOrbitGallery = lazy(() =>
+  import('./components/3d/SpacecraftOrbitGallery').then((module) => ({
+    default: module.SpacecraftOrbitGallery,
+  })),
+)
+const SpaceWarpTransition = lazy(() =>
+  import('./components/3d/SpaceWarpTransition').then((module) => ({
+    default: module.SpaceWarpTransition,
+  })),
+)
+const JunoOrbitalSimulation = lazy(() =>
+  import('./components/mission/JunoOrbitalSimulation').then((module) => ({
+    default: module.JunoOrbitalSimulation,
+  })),
 )
 const defaultSpacecraft =
   availableSpacecraftCatalog.find((spacecraft) => spacecraft.id === 'landsat-8') ??
@@ -140,6 +173,22 @@ function MissionDataTable({ title, rows }: MissionDataTableProps) {
         </table>
       </div>
     </section>
+  )
+}
+
+function AppHomeLink({ onHome }: { onHome: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label="Amplify Vision home"
+      onClick={onHome}
+      className="app-home-link fixed left-4 top-4 z-[100] inline-flex items-center gap-2 border border-white/35 bg-black/85 px-3 py-2 text-[10px] tracking-[0.16em] text-white shadow-lg backdrop-blur transition hover:border-white hover:bg-black"
+    >
+      <span className="grid h-6 w-6 place-items-center border border-white/70 text-xs font-bold tracking-normal" aria-hidden="true">
+        A
+      </span>
+      <span>AMPLIFY<strong className="ml-1 font-bold">VISION</strong></span>
+    </button>
   )
 }
 
@@ -267,6 +316,7 @@ function App() {
   const [launchRecord, setLaunchRecord] = useState<LaunchRecord | null>(
     missionControlRestore.session?.record ?? null,
   )
+  const [launchDemoMode, setLaunchDemoMode] = useState(false)
   const [campaignEvaluation, setCampaignEvaluation] = useState<StoredCampaignEvaluation | null>(null)
   const [campaignState, setCampaignState] = useState<CampaignState>(() => {
     const loaded = loadCampaignProgress()
@@ -275,6 +325,7 @@ function App() {
   const [launchAttempt, setLaunchAttempt] = useState(
     missionControlRestore.session?.record.attemptId ?? 0,
   )
+  const lastAppRouteKey = useRef<string | null>(null)
   const [selectedDestinationId, setSelectedDestinationId] = useState(destinations[0].id)
   const [selectedPlannerBodyId, setSelectedPlannerBodyId] = useState('earth')
   const [launchDate, setLaunchDate] = useState(() => new Date().toISOString().slice(0, 10))
@@ -343,49 +394,71 @@ function App() {
   }, [missionControlRunning, updateMissionControlSession])
 
   useEffect(() => {
-    const handleHistoryNavigation = () => {
-      if (window.location.hash === '#mission-control') {
-        const restored = loadMissionControlSession()
-        if (!restored.session) {
-          setMissionControlWarning(restored.warning ?? 'No deployed mission is available to restore.')
-          setLaunchScreen('builder')
-          return
-        }
-        setMissionControlSession(restored.session)
-        missionControlSessionRef.current = restored.session
-        setLaunchRecord(restored.session.record)
-        setGameMode(restored.session.record.mode)
-        setSelectedCampaignMissionId(
-          restored.session.campaignMissionId ?? campaignMissions[0].id,
+    const route: AppNavigationEntry = {
+      kind: 'page',
+      entryScreen,
+      launchScreen,
+      showCinematicLanding,
+    }
+    const routeKey = JSON.stringify(route)
+    const routeUrl = () => {
+      const hash = launchScreen === 'mission-control'
+        ? '#mission-control'
+        : launchScreen === 'mission-overview'
+          ? '#mission-overview'
+          : ''
+      return `${window.location.pathname}${window.location.search}${hash}`
+    }
+    const withNavigationState = (navigation: AppNavigationEntry) => {
+      const currentState = window.history.state
+      const baseState = currentState && typeof currentState === 'object'
+        ? currentState as Record<string, unknown>
+        : {}
+      return { ...baseState, [APP_NAVIGATION_STATE_KEY]: navigation }
+    }
+
+    if (lastAppRouteKey.current === null) {
+      const currentState = window.history.state as Record<string, unknown> | null
+      const savedNavigation = currentState?.[APP_NAVIGATION_STATE_KEY] as AppNavigationEntry | undefined
+      if (savedNavigation?.kind === 'sentinel') {
+        window.history.pushState(withNavigationState(route), '', routeUrl())
+      } else if (!savedNavigation) {
+        window.history.replaceState(
+          withNavigationState({ kind: 'sentinel' }),
+          '',
+          window.location.href,
         )
-        setSelectedMissionId(restored.session.missionGoalId)
-        setSelectedSpacecraft(
-          availableSpacecraftCatalog.find(
-            (spacecraft) =>
-              spacecraft.id === restored.session?.record.spacecraftId ||
-              spacecraft.name === restored.session?.record.spacecraftName,
-          ) ?? defaultSpacecraft,
-        )
-        setMissionControlWarning(saveMissionControlSession(restored.session))
-        setLaunchScreen('mission-control')
+        window.history.pushState(withNavigationState(route), '', routeUrl())
+      } else {
+        window.history.replaceState(withNavigationState(route), '', routeUrl())
+      }
+      lastAppRouteKey.current = routeKey
+    } else if (lastAppRouteKey.current !== routeKey) {
+      window.history.pushState(withNavigationState(route), '', routeUrl())
+      lastAppRouteKey.current = routeKey
+    }
+  }, [entryScreen, launchScreen, showCinematicLanding])
+
+  useEffect(() => {
+    const handleHistoryNavigation = (event: PopStateEvent) => {
+      const state = event.state as Record<string, unknown> | null
+      const navigation = state?.[APP_NAVIGATION_STATE_KEY] as AppNavigationEntry | undefined
+      if (navigation?.kind === 'page') {
+        lastAppRouteKey.current = JSON.stringify(navigation)
+        setEntryScreen(navigation.entryScreen)
+        setLaunchScreen(navigation.launchScreen)
+        setShowCinematicLanding(navigation.showCinematicLanding)
         return
       }
-      if (window.location.hash === '#mission-overview') {
-        setLaunchScreen('mission-overview')
-        return
-      }
-      if (launchScreen === 'mission-control') {
-        setLaunchScreen('mission-overview')
-        return
-      }
-      if (launchScreen === 'mission-overview') {
-        setEntryScreen('home')
-        setLaunchScreen('builder')
-      }
+
+      lastAppRouteKey.current = JSON.stringify({ kind: 'sentinel' })
+      setShowCinematicLanding(false)
+      setEntryScreen('home')
+      setLaunchScreen('builder')
     }
     window.addEventListener('popstate', handleHistoryNavigation)
     return () => window.removeEventListener('popstate', handleHistoryNavigation)
-  }, [launchScreen])
+  }, [])
 
   const selectedDestination =
     destinations.find((destination) => destination.id === selectedDestinationId) ?? destinations[0]
@@ -543,7 +616,11 @@ function App() {
     setMissionControlSession(null)
     setMissionControlWarning(clearMissionControlSession())
     if (window.location.hash) {
-      window.history.replaceState({}, '', `${window.location.pathname}${window.location.search}`)
+      window.history.replaceState(
+        window.history.state,
+        '',
+        `${window.location.pathname}${window.location.search}`,
+      )
     }
   }
   const updateLaunchDate = (date: string) => {
@@ -669,17 +746,34 @@ function App() {
   }
   const launchMission = (vehicle: LaunchVehicleSpec) => {
     const totalCost = buildStats.missionCost + vehicle.launchCostMillions
+    const missionProfile =
+      selectedDestinationId === 'asteroid-planning'
+        ? 'planning'
+        : gameMode === 'mission' &&
+            `${selectedMission.name} ${selectedMission.description}`.toLocaleLowerCase().includes('flyby')
+          ? 'flyby'
+          : 'orbiter'
     const launchRequirements = evaluateMissionRequirements(missionWithBudgetLimit, {
       ...buildStats,
       missionCost: totalCost,
     })
-    const assessment = assessLaunchOutcome(buildStats.mass, buildStats.reliability, vehicle)
+    const assessment = assessLaunchOutcome(buildStats.mass, buildStats.reliability, vehicle, {
+      destination: selectedDestination.label,
+      missionType: missionProfile === 'orbiter' ? 'orbital' : missionProfile === 'flyby' ? 'flyby' : 'unknown',
+      availableDeltaV: buildStats.deltaV,
+      requiredDeltaV: launchRequirements.find((requirement) => requirement.id === 'deltaV')?.target ?? buildStats.deltaV,
+      availablePowerW: buildStats.power,
+      requiredPowerW: launchRequirements.find((requirement) => requirement.id === 'power')?.target ?? buildStats.powerDemand,
+      availableCommunication: buildStats.communication,
+      requiredCommunication: launchRequirements.find((requirement) => requirement.id === 'communication')?.target ?? 0,
+      availableInstruments: buildStats.instrumentCount,
+      requiredInstruments: launchRequirements.find((requirement) => requirement.id === 'instruments')?.target ?? 0,
+      maxMassKg: launchRequirements.find((requirement) => requirement.id === 'maxMass')?.target ?? undefined,
+    })
     const ephemerides = isAsteroidPlanningExercise
       ? []
       : plannerPositions.filter((position) => position.requestedDate === launchDate)
-    const destinationBody = heliocentricBodies.find(
-      (body) => body.destinationId === selectedDestinationId,
-    ) ?? null
+    const destinationBody = getPlanetaryBodyForDestination(selectedDestinationId) ?? null
     const transferEstimate =
       destinationBody && destinationBody.id !== 'earth'
         ? (() => {
@@ -702,6 +796,8 @@ function App() {
       planningSnapshot: {
         launchDate,
         destinationBodyId: destinationBody?.id ?? null,
+        destinationId: selectedDestinationId,
+        missionProfile,
         ephemerides,
         transferEstimate,
       },
@@ -728,6 +824,7 @@ function App() {
       },
       missionRequirementResults: launchRequirements,
       ...assessment,
+      failureCategory: assessment.failureCategory,
     })
     setLaunchScreen('results')
   }
@@ -752,18 +849,15 @@ function App() {
       campaignMissionId: gameMode === 'mission' ? selectedCampaignMission.id : null,
     })
     updateMissionControlSession(session)
-    window.history.pushState({}, '', `${window.location.pathname}${window.location.search}#mission-control`)
     setLaunchScreen('mission-control')
   }
 
   const returnToMissionOverview = () => {
-    window.history.pushState({}, '', `${window.location.pathname}${window.location.search}#mission-overview`)
     setLaunchScreen('mission-overview')
   }
 
   const openMissionControl = () => {
     if (!missionControlSession) return
-    window.history.pushState({}, '', `${window.location.pathname}${window.location.search}#mission-control`)
     setLaunchScreen('mission-control')
   }
 
@@ -773,8 +867,21 @@ function App() {
     setLaunchScreen('simulation')
   }
 
+  const returnToHome = () => {
+    setShowCinematicLanding(false)
+    setEntryScreen('home')
+    setLaunchScreen('builder')
+  }
+  const appHomeLink =
+    entryScreen !== 'home' && (entryScreen !== 'builder' || launchScreen !== 'builder') ||
+    launchScreen === 'mission-control' ||
+    launchScreen === 'mission-overview'
+      ? <AppHomeLink onHome={returnToHome} />
+      : null
+
   const missionControlChat = (
     <>
+      {appHomeLink}
       <Suspense fallback={null}>
         <MissionControlChat
           context={{
@@ -803,33 +910,43 @@ function App() {
 
   if (launchScreen === 'mission-control' && missionControlSession) {
     return (
-      <Suspense fallback={<div className="grid min-h-screen place-items-center bg-[#03080e] text-sm text-slate-300">Establishing Mission Control…</div>}>
-        <MissionControlPage
-          key={missionControlSession.record.attemptId}
-          initialSession={missionControlSession}
-          onSessionChange={updateMissionControlSession}
-          onReturnToOverview={returnToMissionOverview}
-          onRunMissionAssessment={runMissionControlAssessment}
-          persistenceWarning={missionControlWarning}
-        />
-      </Suspense>
+      <>
+        {appHomeLink}
+        <Suspense fallback={<div className="grid min-h-screen place-items-center bg-[#03080e] text-sm text-slate-300">Establishing Mission Control…</div>}>
+          <MissionControlPage
+            key={missionControlSession.record.attemptId}
+            initialSession={missionControlSession}
+            onSessionChange={updateMissionControlSession}
+            onReturnToOverview={returnToMissionOverview}
+            onRunMissionAssessment={runMissionControlAssessment}
+            persistenceWarning={missionControlWarning}
+          />
+        </Suspense>
+      </>
     )
   }
 
   if (launchScreen === 'mission-overview' && missionControlSession) {
     return (
-      <MissionOverview
-        session={missionControlSession}
-        onEnterMissionControl={openMissionControl}
-        onRunAssessment={runMissionControlAssessment}
-        onExit={() => {
-          setLaunchScreen('builder')
-          setEntryScreen('home')
-          if (window.location.hash) {
-            window.history.replaceState({}, '', `${window.location.pathname}${window.location.search}`)
-          }
-        }}
-      />
+      <>
+        {appHomeLink}
+        <MissionOverview
+          session={missionControlSession}
+          onEnterMissionControl={openMissionControl}
+          onRunAssessment={runMissionControlAssessment}
+          onExit={() => {
+            setLaunchScreen('builder')
+            setEntryScreen('home')
+            if (window.location.hash) {
+              window.history.replaceState(
+                window.history.state,
+                '',
+                `${window.location.pathname}${window.location.search}`,
+              )
+            }
+          }}
+        />
+      </>
     )
   }
 
@@ -852,19 +969,37 @@ function App() {
     )
   }
 
+  if (entryScreen === 'juno-orbit') {
+    return (
+      <Suspense
+        fallback={
+          <div className="grid min-h-screen place-items-center bg-[#030912] text-sm text-slate-300">
+            Preparing Juno orbital simulation…
+          </div>
+        }
+      >
+        <JunoOrbitalSimulation onBack={() => setEntryScreen('home')} />
+      </Suspense>
+    )
+  }
+
   if (entryScreen === 'home') {
     return (
       <>
         <HomeScreen
           onMissionMode={() => setEntryScreen('campaign')}
           onLiveEvents={() => setEntryScreen('events')}
+          onJunoSimulation={() => {
+            setShowCinematicLanding(false)
+            setEntryScreen('juno-orbit')
+          }}
           onFreeplayMode={() => {
             clearSavedMissionControl()
             setGameMode('freeplay')
             setTestedDesign(null)
             setLaunchRecord(null)
             setLaunchScreen('builder')
-            setEntryScreen('builder')
+            setEntryScreen('freeplay-warp')
           }}
         />
         {missionControlSession && (
@@ -906,6 +1041,50 @@ function App() {
           onCreateMission={startEventMission}
           savedMissionIds={campaignProgress.eventMissions.map((mission) => mission.id)}
         />
+        {missionControlChat}
+      </>
+    )
+  }
+
+  if (entryScreen === 'freeplay-warp') {
+    return (
+      <Suspense
+        fallback={
+          <div className="min-h-screen bg-[#020711]" aria-hidden="true" />
+        }
+      >
+        <SpaceWarpTransition
+          selectedId={selectedSpacecraft.id}
+          onClose={() => setEntryScreen('home')}
+          onSelect={(spacecraft) => {
+            setSelectedSpacecraft(spacecraft)
+            setEntryScreen('builder')
+          }}
+        />
+      </Suspense>
+    )
+  }
+
+  if (entryScreen === 'freeplay-catalog') {
+    return (
+      <>
+        <Suspense
+          fallback={
+            <div className="grid min-h-screen place-items-center bg-black text-sm text-white/70">
+              Preparing spacecraft gallery...
+            </div>
+          }
+        >
+          <SpacecraftOrbitGallery
+            selectedId={selectedSpacecraft.id}
+            selectedModel={null}
+            onClose={() => setEntryScreen('home')}
+            onSelect={(spacecraft) => {
+              setSelectedSpacecraft(spacecraft)
+              setEntryScreen('builder')
+            }}
+          />
+        </Suspense>
         {missionControlChat}
       </>
     )
@@ -1003,9 +1182,14 @@ function App() {
             <p className="mb-2 text-[10px] font-medium uppercase tracking-[0.35em] text-sky-300/80">
               {gameMode === 'freeplay' ? 'Freeplay · Open sandbox' : `Mission Mode · Level ${selectedCampaignMission.level}`}
             </p>
-            <h1 className="text-3xl font-semibold tracking-[-0.06em] text-white sm:text-4xl">
+            <button
+              type="button"
+              onClick={returnToHome}
+              aria-label="Amplify Vision home"
+              className="text-left text-3xl font-semibold tracking-[-0.06em] text-white transition hover:text-slate-300 sm:text-4xl"
+            >
               Amplify Vision
-            </h1>
+            </button>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <div className={`flex items-center gap-3 rounded-full border px-3 py-2 text-sm ${
@@ -1486,7 +1670,14 @@ function App() {
                 selectedVehicleId={selectedLaunchVehicleId}
                 onSelectVehicle={setSelectedLaunchVehicleId}
                 onReturnToBuilder={() => setLaunchScreen('builder')}
-                onLaunch={launchMission}
+                onLaunch={(vehicle) => {
+                  setLaunchDemoMode(false)
+                  launchMission(vehicle)
+                }}
+                onDemoMission={(vehicle) => {
+                  setLaunchDemoMode(true)
+                  launchMission(vehicle)
+                }}
                 spacecraftName={selectedSpacecraft.name}
                 spacecraftMassKg={buildStats.mass}
                 existingMissionCostMillions={buildStats.missionCost}
@@ -1500,12 +1691,16 @@ function App() {
               <LaunchResults
                 key={launchRecord.attemptId}
                 record={launchRecord}
-                onRetry={launchMission}
+                onRetry={(vehicle) => {
+                  setLaunchDemoMode(false)
+                  launchMission(vehicle)
+                }}
                 onReturnToBuilder={() => setLaunchScreen('builder')}
                 onChangeLaunchVehicle={() => setLaunchScreen('selection')}
                 onMissionFailure={() => finishCampaignAttempt(launchRecord)}
                 onStartMissionSimulation={() => setLaunchScreen('simulation')}
                 onEnterMissionControl={enterMissionControl}
+                startInDemoMode={launchDemoMode}
               />
             ) : (
               <>
