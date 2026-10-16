@@ -1,12 +1,16 @@
 import { motion } from 'framer-motion'
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   antennaOptions,
   buildComponentLabels,
   calculateBuildStats,
   createInitialBuild,
   engineOptions,
+  getComponentFit,
+  getSpacecraftBuildProfile,
   instrumentOptions,
+  normalizeBuild,
   solarPanelOptions,
   type AntennaType,
   type BuildComponentId,
@@ -341,6 +345,10 @@ function App() {
   const [fuel, setFuel] = useState(750)
   const [budget, setBudget] = useState(3)
   const [riskTolerance, setRiskTolerance] = useState(38)
+  const [buildControlsSlot, setBuildControlsSlot] = useState<HTMLDivElement | null>(null)
+  const [trajectoryControlsSlot, setTrajectoryControlsSlot] = useState<HTMLDivElement | null>(null)
+  const [sustainabilityControlsSlot, setSustainabilityControlsSlot] = useState<HTMLDivElement | null>(null)
+  const [experimentPanelSlot, setExperimentPanelSlot] = useState<HTMLDivElement | null>(null)
 
   const campaignProgress = campaignState.progress
   const updateMissionControlSession = useCallback((session: MissionControlSession) => {
@@ -378,6 +386,17 @@ function App() {
       })
     return () => controller.abort()
   }, [entryScreen, isAsteroidPlanningExercise, launchDate, launchScreen])
+
+  useEffect(() => {
+    if (entryScreen !== 'builder' || launchScreen !== 'selection') return
+    const frameId = window.requestAnimationFrame(() => {
+      document.getElementById('launch-vehicle-selection')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+    })
+    return () => window.cancelAnimationFrame(frameId)
+  }, [entryScreen, launchScreen])
 
   const missionControlRunning =
     missionControlSession !== null && !missionControlSession.state.paused
@@ -608,9 +627,18 @@ function App() {
             : []),
         ]
   const remainingMissionBudget = missionBudgetLimitMillions - metrics.totalCost
-  const availableComponents: BuildComponentId[] = ['solarPanel', 'antenna', 'engine', 'instrument']
+  const buildProfile = getSpacecraftBuildProfile(selectedSpacecraft)
+  const availableComponents = buildProfile.components
+  const normalizedBuild = useMemo(
+    () => normalizeBuild(selectedSpacecraft, build),
+    [build, selectedSpacecraft],
+  )
   const updateBuild = <Key extends keyof typeof build>(key: Key, value: (typeof build)[Key]) =>
     setBuild((current) => ({ ...current, [key]: value }))
+  const selectSpacecraft = (spacecraft: (typeof availableSpacecraftCatalog)[number]) => {
+    setSelectedSpacecraft(spacecraft)
+    setBuild((current) => normalizeBuild(spacecraft, current))
+  }
   const clearSavedMissionControl = () => {
     missionControlSessionRef.current = null
     setMissionControlSession(null)
@@ -673,7 +701,7 @@ function App() {
     const recommendedSpacecraft = availableSpacecraftCatalog.find(
       (spacecraft) => spacecraft.id === campaignMission.recommendedSpacecraftId,
     )
-    if (recommendedSpacecraft) setSelectedSpacecraft(recommendedSpacecraft)
+    if (recommendedSpacecraft) selectSpacecraft(recommendedSpacecraft)
     setSelectedDestinationId(missionGoal.destinationId)
     setSelectedPlannerBodyId(getPlanetaryBodyForDestination(missionGoal.destinationId)?.id ?? 'earth')
     setSelectedLaunchVehicleId(null)
@@ -1057,7 +1085,7 @@ function App() {
           selectedId={selectedSpacecraft.id}
           onClose={() => setEntryScreen('home')}
           onSelect={(spacecraft) => {
-            setSelectedSpacecraft(spacecraft)
+            selectSpacecraft(spacecraft)
             setEntryScreen('builder')
           }}
         />
@@ -1080,7 +1108,7 @@ function App() {
             selectedModel={null}
             onClose={() => setEntryScreen('home')}
             onSelect={(spacecraft) => {
-              setSelectedSpacecraft(spacecraft)
+              selectSpacecraft(spacecraft)
               setEntryScreen('builder')
             }}
           />
@@ -1249,7 +1277,7 @@ function App() {
                       const spacecraft = availableSpacecraftCatalog.find(
                         (craft) => craft.id === event.target.value,
                       )
-                      if (spacecraft) setSelectedSpacecraft(spacecraft)
+                      if (spacecraft) selectSpacecraft(spacecraft)
                     }}
                     className="w-full rounded-xl border border-white/10 bg-slate-950/40 px-3 py-3 text-sm text-slate-100 outline-none focus:border-sky-400/60"
                   >
@@ -1335,13 +1363,42 @@ function App() {
               </div>
             </div>
 
+            {buildControlsSlot && createPortal(
             <div className="rounded-[28px] border border-white/8 bg-slate-900/70 p-5 shadow-[0_15px_55px_rgba(15,23,42,0.45)] backdrop-blur-xl">
               <div className="mb-4">
                 <h3 className="text-lg font-medium text-white">Build / Edit</h3>
                 <p className="mt-1 text-xs text-slate-400">
-                  The spacecraft model shows its original configuration. Add optional modules to customize it.
+                  {selectedSpacecraft.name}: {buildProfile.summary}
                 </p>
               </div>
+              <div className="mb-4 rounded-xl border border-sky-300/15 bg-sky-300/[.04] p-3">
+                <h4 className="text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-200">
+                  Systems in this model
+                </h4>
+                <dl className="mt-2 space-y-1.5 text-[11px]">
+                  {[
+                    ['Power', selectedSpacecraft.powerSystem ?? 'Not specified'],
+                    ['Communications', selectedSpacecraft.communication],
+                    ['Propulsion', selectedSpacecraft.propulsionSystem ?? 'Not specified'],
+                    ...(selectedSpacecraft.instruments?.length
+                      ? [['Science instruments', selectedSpacecraft.instruments.join(', ')]]
+                      : []),
+                  ].map(([label, value]) => (
+                    <div key={label} className="grid grid-cols-[88px_minmax(0,1fr)] gap-2">
+                      <dt className="text-slate-500">{label}</dt>
+                      <dd className="text-slate-300">{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+              <p className="mb-4 text-[10px] leading-relaxed text-slate-500">
+                Extensions are filtered for this spacecraft. Only attachable hardware adds schematic geometry; upgrades highlight modeled parts.
+              </p>
+              {availableComponents.length === 0 && (
+                <p className="mb-4 rounded-xl border border-white/8 bg-slate-950/30 p-3 text-xs text-slate-400">
+                  This model has no compatible optional extensions.
+                </p>
+              )}
               <div className="mb-4 space-y-2">
                 <div className="flex items-center justify-between rounded-xl border border-white/8 bg-slate-950/30 px-3 py-2.5 text-sm">
                   <span className="text-slate-200">Spacecraft body</span>
@@ -1349,58 +1406,78 @@ function App() {
                 </div>
                 {availableComponents.map((component) => {
                   const installed = build.components.includes(component)
+                  const fit = getComponentFit(
+                    buildProfile,
+                    component,
+                    component === 'instrument' ? build.instrumentType : undefined,
+                  )
                   return (
                     <div
                       key={component}
-                      className="flex items-center justify-between gap-2 rounded-xl border border-white/8 bg-slate-950/30 px-3 py-2.5"
+                      className="space-y-2 rounded-xl border border-white/8 bg-slate-950/30 px-3 py-2.5"
                     >
-                      <span className="text-sm text-slate-200">
-                        {buildComponentLabels[component]}
-                        {component === 'instrument' && installed && (
-                          <span className="ml-1 text-slate-400">×{build.instrumentCount}</span>
-                        )}
-                      </span>
-                      <div className="flex items-center gap-1.5">
-                        {component === 'instrument' && installed && (
-                          <>
-                            <button
-                              type="button"
-                              aria-label="Remove one science instrument"
-                              disabled={build.instrumentCount <= 1}
-                              onClick={() =>
-                                updateBuild('instrumentCount', Math.max(1, build.instrumentCount - 1))
-                              }
-                              className="grid h-7 w-7 place-items-center rounded-full border border-white/10 text-sm text-slate-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-35"
-                            >
-                              −
-                            </button>
-                            <button
-                              type="button"
-                              aria-label="Add one science instrument"
-                              disabled={build.instrumentCount >= 4}
-                              onClick={() =>
-                                updateBuild('instrumentCount', Math.min(4, build.instrumentCount + 1))
-                              }
-                              className="grid h-7 w-7 place-items-center rounded-full border border-white/10 text-sm text-slate-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-35"
-                            >
-                              +
-                            </button>
-                          </>
-                        )}
-                        <button
-                          type="button"
-                          aria-label={`${installed ? 'Remove' : 'Add'} ${buildComponentLabels[component]}`}
-                          aria-pressed={installed}
-                          onClick={() => toggleComponent(component)}
-                          className={`rounded-full border px-3 py-1 text-xs transition disabled:cursor-not-allowed disabled:opacity-40 ${
-                            installed
-                              ? 'border-rose-300/25 bg-rose-300/10 text-rose-100 hover:bg-rose-300/20'
-                              : 'border-emerald-300/25 bg-emerald-300/10 text-emerald-100 hover:bg-emerald-300/20'
-                          }`}
-                        >
-                          {installed ? 'Remove' : `+ Add`}
-                        </button>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm text-slate-200">
+                          {buildProfile.componentLabels[component] ?? buildComponentLabels[component]}
+                          {component === 'instrument' && installed && (
+                            <span className="ml-1 text-slate-400">×{build.instrumentCount}</span>
+                          )}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          {component === 'instrument' && installed && (
+                            <>
+                              <button
+                                type="button"
+                                aria-label="Remove one science instrument"
+                                disabled={build.instrumentCount <= 1}
+                                onClick={() =>
+                                  updateBuild('instrumentCount', Math.max(1, build.instrumentCount - 1))
+                                }
+                                className="grid h-7 w-7 place-items-center rounded-full border border-white/10 text-sm text-slate-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-35"
+                              >
+                                −
+                              </button>
+                              <button
+                                type="button"
+                                aria-label="Add one science instrument"
+                                disabled={build.instrumentCount >= 4}
+                                onClick={() =>
+                                  updateBuild('instrumentCount', Math.min(4, build.instrumentCount + 1))
+                                }
+                                className="grid h-7 w-7 place-items-center rounded-full border border-white/10 text-sm text-slate-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-35"
+                              >
+                                +
+                              </button>
+                            </>
+                          )}
+                          <button
+                            type="button"
+                            aria-label={`${installed ? 'Remove' : 'Add'} ${buildProfile.componentLabels[component] ?? buildComponentLabels[component]}`}
+                            aria-pressed={installed}
+                            onClick={() => toggleComponent(component)}
+                            className={`rounded-full border px-3 py-1 text-xs transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                              installed
+                                ? 'border-rose-300/25 bg-rose-300/10 text-rose-100 hover:bg-rose-300/20'
+                                : 'border-emerald-300/25 bg-emerald-300/10 text-emerald-100 hover:bg-emerald-300/20'
+                            }`}
+                          >
+                            {installed ? 'Remove' : `+ Add`}
+                          </button>
+                        </div>
                       </div>
+                      {!installed && buildProfile.componentDescriptions[component] && (
+                        <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
+                          {buildProfile.componentDescriptions[component]}
+                        </p>
+                      )}
+                      {installed && fit && (
+                        <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
+                          <span className="mr-1 font-medium uppercase tracking-wide text-sky-300">
+                            {fit.mode === 'internal' ? 'Internal' : fit.mode === 'upgrade' ? 'Model upgrade' : 'Mounted'}
+                          </span>
+                          {fit.note}
+                        </p>
+                      )}
                     </div>
                   )
                 })}
@@ -1432,8 +1509,10 @@ function App() {
                       onChange={(event) => updateBuild('antennaType', event.target.value as AntennaType)}
                       className="mt-1 w-full rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2.5 text-sm text-white"
                     >
-                      {(Object.keys(antennaOptions) as AntennaType[]).map((type) => (
-                        <option key={type} value={type}>{antennaOptions[type].label}</option>
+                      {(buildProfile.antennaTypes ?? []).map((type: AntennaType) => (
+                        <option key={type} value={type}>
+                          {buildProfile.antennaLabels?.[type] ?? antennaOptions[type].label}
+                        </option>
                       ))}
                     </select>
                   </label>
@@ -1447,7 +1526,7 @@ function App() {
                       onChange={(event) => updateBuild('engineType', event.target.value as EngineType)}
                       className="mt-1 w-full rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2.5 text-sm text-white"
                     >
-                      {(Object.keys(engineOptions) as EngineType[]).map((type) => (
+                      {(buildProfile.engineTypes ?? []).map((type: EngineType) => (
                         <option key={type} value={type}>{engineOptions[type].label}</option>
                       ))}
                     </select>
@@ -1462,15 +1541,20 @@ function App() {
                       onChange={(event) => updateBuild('instrumentType', event.target.value as InstrumentType)}
                       className="mt-1 w-full rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2.5 text-sm text-white"
                     >
-                      {(Object.keys(instrumentOptions) as InstrumentType[]).map((type) => (
-                        <option key={type} value={type}>{instrumentOptions[type].label}</option>
+                      {(buildProfile.instrumentTypes ?? []).map((type: InstrumentType) => (
+                        <option key={type} value={type}>
+                          {buildProfile.instrumentLabels?.[type] ?? instrumentOptions[type].label}
+                        </option>
                       ))}
                     </select>
                   </label>
                 )}
               </div>
-            </div>
+            </div>,
+              buildControlsSlot,
+            )}
 
+            {sustainabilityControlsSlot && createPortal(
             <div className="rounded-[28px] border border-emerald-300/15 bg-slate-900/70 p-5 shadow-[0_15px_55px_rgba(15,23,42,0.45)] backdrop-blur-xl">
               <div className="mb-4">
                 <h3 className="text-lg font-medium text-white">Sustainability choices</h3>
@@ -1633,7 +1717,9 @@ function App() {
                   </fieldset>
                 )}
               </div>
-            </div>
+            </div>,
+            sustainabilityControlsSlot,
+            )}
 
           </aside>
 
@@ -1725,8 +1811,8 @@ function App() {
                 >
                   <SpacecraftViewer
                     spacecraft={selectedSpacecraft}
-                    build={build}
-                    onSelectSpacecraft={setSelectedSpacecraft}
+                    build={normalizedBuild}
+                    onSelectSpacecraft={selectSpacecraft}
                   />
                 </Suspense>
                 <div className="flex flex-col gap-4 rounded-[24px] border border-white/8 bg-slate-950/45 p-4">
@@ -1776,6 +1862,8 @@ function App() {
                 </div>
               </div>
             </motion.div>
+
+            <div ref={setExperimentPanelSlot} />
 
             <SolarSystemPlanner
               mode={gameMode ?? 'mission'}
@@ -2031,9 +2119,9 @@ function App() {
                       : 'Not installed',
                   },
                   {
-                    label: 'Science instrument',
+                    label: buildProfile.componentLabels.instrument ?? 'Science instrument',
                     value: build.components.includes('instrument')
-                      ? `${instrumentOptions[build.instrumentType].label} ×${build.instrumentCount}`
+                      ? `${buildProfile.instrumentLabels?.[build.instrumentType] ?? instrumentOptions[build.instrumentType].label} ×${build.instrumentCount}`
                       : 'Not installed',
                   },
                   { label: 'Science payload', value: `${payload.toLocaleString()} kg` },
@@ -2041,6 +2129,7 @@ function App() {
                   { label: 'Risk tolerance', value: `${riskTolerance}%` },
                 ]}
               />
+              {trajectoryControlsSlot && createPortal(
               <div className="rounded-[28px] border border-white/8 bg-slate-900/70 p-5 shadow-[0_15px_55px_rgba(15,23,42,0.45)] backdrop-blur-xl">
                 <h3 className="mb-4 text-lg font-medium text-white">Trajectory tuning</h3>
                 <div className="space-y-5">
@@ -2106,13 +2195,21 @@ function App() {
                     />
                   </label>
                 </div>
-              </div>
+              </div>,
+              trajectoryControlsSlot,
+              )}
             </div>
               </>
             )}
           </section>
 
           <aside className="space-y-6">
+            <div className="space-y-6">
+              <div ref={setBuildControlsSlot} />
+              <div ref={setTrajectoryControlsSlot} />
+              <div ref={setSustainabilityControlsSlot} />
+            </div>
+            {experimentPanelSlot && createPortal(
             <section className="rounded-[28px] border border-sky-400/15 bg-slate-900/75 p-5 shadow-[0_15px_55px_rgba(15,23,42,0.45)]">
               <div className="mb-4">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.25em] text-sky-300/80">
@@ -2279,7 +2376,9 @@ function App() {
               )}
                 </>
               )}
-            </section>
+            </section>,
+            experimentPanelSlot,
+            )}
 
             <MissionDataTable
               title="Spacecraft profile"

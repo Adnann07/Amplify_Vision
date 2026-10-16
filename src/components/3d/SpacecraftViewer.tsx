@@ -1,16 +1,18 @@
 import { OrbitControls, Sparkles, Stars } from '@react-three/drei'
 import { Canvas, useThree } from '@react-three/fiber'
 import { Component, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Box3, Group, PerspectiveCamera, Sphere, Vector3 } from 'three'
+import { Box3, Group, Material, Mesh, MeshStandardMaterial, PerspectiveCamera, Sphere, Vector3 } from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { availableSpacecraftCatalog, type SpacecraftSpec } from '../../data/spacecraft'
 import { loadSpacecraftModel, type LoadedModel } from './spacecraftModelLoader'
 import {
-  antennaOptions,
-  engineOptions,
+  getComponentFit,
+  getSpacecraftBuildProfile,
   instrumentOptions,
+  normalizeBuild,
   solarPanelOptions,
   type BuildComponentId,
+  type MountPoint,
   type SpacecraftBuild,
 } from '../../data/spacecraftBuild'
 
@@ -82,6 +84,91 @@ function SpacecraftViewerFallback({ spacecraft }: { spacecraft: SpacecraftSpec }
   )
 }
 
+const mountAliases: Partial<Record<MountPoint, string[]>> = {
+  'truss-array-mast': ['array mast', 'solar array', 'solararray', 'truss'],
+  'truss-payload-carrier': ['payload carrier', 'payload pallet', 'external payload'],
+  'remote-sensing-pallet': ['remote sensing pallet', 'instrument pallet', 'science pallet'],
+  'nadir-deck': ['nadir deck', 'instrument deck', 'science deck'],
+}
+
+function resolveMountPosition(
+  root: Group,
+  mountPoint: MountPoint,
+  index: number,
+  slots: number,
+) {
+  root.updateWorldMatrix(true, true)
+  const bounds = new Box3().setFromObject(root)
+  const center = bounds.getCenter(new Vector3())
+  const size = bounds.getSize(new Vector3())
+  const slotOffset = slots <= 1 ? 0 : (index / (slots - 1) - 0.5) * 0.42
+
+  let socketBounds: Box3 | undefined
+  const socketNames = mountAliases[mountPoint]
+  if (socketNames) {
+    root.traverse((object) => {
+      if (socketBounds || !object.name) return
+      const name = object.name.toLowerCase()
+      if (!socketNames.some((socketName) => name.includes(socketName))) return
+      const candidateBounds = new Box3().setFromObject(object)
+      if (!candidateBounds.isEmpty()) socketBounds = candidateBounds
+    })
+  }
+  const socketCenter = socketBounds?.getCenter(new Vector3())
+  const position = center.clone()
+
+  switch (mountPoint) {
+    case 'truss-array-mast':
+      if (socketBounds && socketCenter) {
+        position.copy(socketCenter)
+        position.z = socketBounds.max.z + Math.max(size.z * 0.015, 0.01)
+        position.x += (index === 0 ? -1 : 1) * size.x * 0.17
+      } else {
+        position.x += (index === 0 ? -1 : 1) * size.x * 0.34
+        position.y += size.y * 0.08
+        position.z -= size.z * 0.04
+      }
+      break
+    case 'truss-payload-carrier':
+      if (socketBounds && socketCenter) {
+        position.copy(socketCenter)
+        position.z = socketBounds.max.z + Math.max(size.z * 0.015, 0.01)
+        position.x += slotOffset * size.x * 0.5
+      } else {
+        position.x += slotOffset * size.x
+        position.y -= size.y * 0.16
+        position.z += size.z * 0.12
+      }
+      break
+    case 'remote-sensing-pallet':
+      if (socketBounds && socketCenter) {
+        position.copy(socketCenter)
+        position.x = socketBounds.max.x + Math.max(size.x * 0.015, 0.01)
+        position.y += slotOffset * size.y * 0.5
+      } else {
+        position.x += size.x * 0.38
+        position.y += slotOffset * size.y
+        position.z += size.z * 0.12
+      }
+      break
+    case 'nadir-deck':
+      if (socketBounds && socketCenter) {
+        position.copy(socketCenter)
+        position.y = socketBounds.min.y - Math.max(size.y * 0.015, 0.01)
+        position.x += slotOffset * size.x * 0.5
+      } else {
+        position.x += slotOffset * size.x
+        position.y -= size.y * 0.2
+        position.z += size.z * 0.1
+      }
+      break
+    default:
+      return center
+  }
+
+  return root.parent ? root.parent.worldToLocal(position) : position
+}
+
 function AssemblyComponents({
   model,
   build,
@@ -95,6 +182,9 @@ function AssemblyComponents({
   radius: number
   disassembled: boolean
 }) {
+  const profile = useMemo(() => getSpacecraftBuildProfile(spacecraft), [spacecraft])
+  const activeBuild = useMemo(() => normalizeBuild(spacecraft, build), [build, spacecraft])
+
   useEffect(() => {
     model.root.traverse((object) => {
       const component = object.userData.component as BuildComponentId | undefined
@@ -122,101 +212,131 @@ function AssemblyComponents({
     })
   }, [disassembled, model, radius, spacecraft.model])
 
-  const panel = solarPanelOptions[build.solarPanelSize]
-  const antenna = antennaOptions[build.antennaType]
-  const engine = engineOptions[build.engineType]
-  const instrument = instrumentOptions[build.instrumentType]
-  const enabled = (component: BuildComponentId) => build.components.includes(component)
+  useEffect(() => {
+    const originals = new Map<Mesh, Material | Material[]>()
+    const fitComponents: [BuildComponentId, MountPoint][] = activeBuild.components.flatMap(
+      (component): [BuildComponentId, MountPoint][] => {
+        const fit = getComponentFit(profile, component, activeBuild.instrumentType)
+        return fit?.mode === 'upgrade' ? [[component, fit.mountPoint]] : []
+      },
+    )
+    if (!fitComponents.length) return
+
+    model.root.traverse((object) => {
+      if (!(object instanceof Mesh)) return
+      const name = object.name.toLowerCase()
+      const component = object.userData.component as BuildComponentId | undefined
+      const match = fitComponents.some(([fitComponent, mountPoint]) => {
+        const targetComponent =
+          mountPoint === 'existing-dish'
+            ? 'antenna'
+            : mountPoint === 'existing-solar-array'
+              ? 'solarPanel'
+              : mountPoint === 'existing-main-engine'
+                ? 'engine'
+                : fitComponent
+        if (component !== targetComponent) return false
+
+        if (mountPoint === 'rover-arm-turret') return /arm|turret|pixl|sherloc/.test(name)
+        if (mountPoint === 'rover-underbody') return /under|belly|rimfax|radar/.test(name)
+        if (mountPoint === 'rover-mast') return /mast|camera|supercam/.test(name)
+        return true
+      })
+      if (!match) return
+
+      const originalMaterial = object.material
+      const sourceMaterials = Array.isArray(originalMaterial) ? originalMaterial : [originalMaterial]
+      const highlightedMaterials = sourceMaterials.map((material) => {
+        if (!(material instanceof MeshStandardMaterial)) return material
+        const highlighted = material.clone()
+        highlighted.emissive.set('#38bdf8')
+        highlighted.emissiveIntensity = 0.55
+        return highlighted
+      })
+      originals.set(object, originalMaterial)
+      object.material = Array.isArray(originalMaterial)
+        ? highlightedMaterials
+        : highlightedMaterials[0]
+    })
+
+    return () => {
+      originals.forEach((original, mesh) => {
+        const highlighted = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+        const source = Array.isArray(original) ? original : [original]
+        highlighted.forEach((material, index) => {
+          if (material !== source[index]) material.dispose()
+        })
+        mesh.material = original
+      })
+    }
+  }, [activeBuild.components, activeBuild.instrumentType, model, profile])
+
+  const panel = solarPanelOptions[activeBuild.solarPanelSize]
+  const instrument = instrumentOptions[activeBuild.instrumentType]
+  const enabled = (component: BuildComponentId) => activeBuild.components.includes(component)
   const spread = disassembled ? radius * 0.7 : 0
+  const solarFit = getComponentFit(profile, 'solarPanel')
+  const instrumentFit = getComponentFit(profile, 'instrument', activeBuild.instrumentType)
+  const attachedPanels =
+    enabled('solarPanel') && solarFit?.mode === 'attach'
+      ? Math.min(solarFit.slots ?? 2, 2)
+      : 0
+  const attachedInstruments =
+    enabled('instrument') && instrumentFit?.mode === 'attach'
+      ? Math.min(activeBuild.instrumentCount, instrumentFit.slots ?? activeBuild.instrumentCount)
+      : 0
 
   return (
     <>
       <primitive object={model.root} dispose={null} />
-      {enabled('solarPanel') && (
-        <group>
-          {([-1, 1] as const).map((side, index) => (
-            <group
-              key={side}
-              position={[side * (radius * 1.12 + spread), disassembled ? (index ? 1 : -1) * spread * 0.15 : 0, 0]}
-            >
-              <mesh castShadow receiveShadow>
-                <boxGeometry
-                  args={[
-                    radius * 0.78 * panel.scale,
-                    radius * 0.045,
-                    radius * 0.5 * panel.scale,
-                  ]}
-                />
-                <meshStandardMaterial
-                  color="#3579ad"
-                  metalness={0.62}
-                  roughness={0.32}
-                  emissive="#12304a"
-                />
-              </mesh>
-              <mesh position={[-side * radius * 0.43 * panel.scale, 0, 0]}>
-                <cylinderGeometry args={[radius * 0.025, radius * 0.025, radius * 0.38, 8]} />
-                <meshStandardMaterial color="#bdc9d2" metalness={0.7} roughness={0.3} />
-              </mesh>
-            </group>
-          ))}
-        </group>
-      )}
-      {enabled('antenna') && (
-        <group position={[0, radius * 0.62 + spread, 0]}>
-          <mesh position={[0, radius * 0.22, 0]}>
-            <cylinderGeometry args={[radius * 0.025, radius * 0.04, radius * 0.48, 8]} />
-            <meshStandardMaterial color="#bdc9d2" metalness={0.7} roughness={0.3} />
-          </mesh>
-          <mesh position={[0, radius * 0.48, 0]} rotation={[Math.PI / 2, 0, 0]}>
-            <cylinderGeometry
-              args={[radius * 0.34 * antenna.scale, radius * 0.34 * antenna.scale, radius * 0.06, 32]}
-            />
-            <meshStandardMaterial
-              color={spacecraft.accent}
-              metalness={0.72}
-              roughness={0.28}
-              side={2}
-            />
-          </mesh>
-        </group>
-      )}
-      {enabled('engine') && (
-        <group position={[0, -radius * 0.78 - spread, 0]} scale={engine.scale}>
-          <mesh rotation={[Math.PI, 0, 0]} castShadow>
-            <coneGeometry args={[radius * 0.2, radius * 0.46, 20]} />
-            <meshStandardMaterial color="#aeb9c6" metalness={0.72} roughness={0.3} />
-          </mesh>
-          <mesh position={[0, -radius * 0.19, 0]}>
-            <cylinderGeometry args={[radius * 0.1, radius * 0.14, radius * 0.16, 16]} />
-            <meshStandardMaterial color="#596b7d" metalness={0.75} roughness={0.3} />
-          </mesh>
-        </group>
-      )}
-      {enabled('instrument') && (
-        Array.from({ length: build.instrumentCount }, (_, index) => (
-          <group
-            key={`instrument-${index}`}
-            position={[
-              radius * (0.62 + ((index % 2) * 2 - 1) * 0.25) +
-                (disassembled ? (index % 2 === 0 ? spread : -spread) : 0),
-              -radius * 0.22 + (disassembled ? -spread * 0.15 : 0),
-              radius * (Math.floor(index / 2) * 0.38) +
-                (disassembled ? (index % 2 === 0 ? spread * 0.25 : -spread * 0.25) : 0),
-            ]}
-            scale={instrument.scale}
-          >
-            <mesh castShadow>
-              <boxGeometry args={[radius * 0.28, radius * 0.24, radius * 0.32]} />
-              <meshStandardMaterial color="#c7bba0" metalness={0.5} roughness={0.42} />
+      {Array.from({ length: attachedPanels }, (_, index) => {
+        if (!solarFit) return null
+        const position = resolveMountPosition(
+          model.root,
+          solarFit.mountPoint,
+          index,
+          solarFit.slots ?? attachedPanels,
+        )
+        if (disassembled) position.x += (index === 0 ? -1 : 1) * spread
+        return (
+          <group key={`solar-panel-${index}`} position={position}>
+            <mesh castShadow receiveShadow>
+              <boxGeometry args={[radius * 0.4 * panel.scale, radius * 0.28 * panel.scale, radius * 0.025]} />
+              <meshStandardMaterial color="#397eae" metalness={0.7} roughness={0.3} emissive="#102d43" />
             </mesh>
-            <mesh position={[radius * 0.16, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
-              <cylinderGeometry args={[radius * 0.075, radius * 0.075, radius * 0.1, 16]} />
-              <meshStandardMaterial color={spacecraft.accent} metalness={0.65} roughness={0.25} />
+            <mesh position={[0, 0, radius * 0.035]}>
+              <cylinderGeometry args={[radius * 0.018, radius * 0.018, radius * 0.12, 8]} />
+              <meshStandardMaterial color="#bdc9d2" metalness={0.72} roughness={0.28} />
             </mesh>
           </group>
-        ))
-      )}
+        )
+      })}
+      {Array.from({ length: attachedInstruments }, (_, index) => {
+        if (!instrumentFit) return null
+        const position = resolveMountPosition(
+          model.root,
+          instrumentFit.mountPoint,
+          index,
+          instrumentFit.slots ?? attachedInstruments,
+        )
+        if (disassembled) position.x += (index % 2 === 0 ? 1 : -1) * spread
+        return (
+          <group key={`instrument-${index}`} position={position} scale={instrument.scale}>
+            <mesh castShadow>
+              <boxGeometry args={[radius * 0.13, radius * 0.1, radius * 0.11]} />
+              <meshStandardMaterial color="#c7bba0" metalness={0.58} roughness={0.38} />
+            </mesh>
+            <mesh position={[0, 0, radius * 0.065]}>
+              <cylinderGeometry args={[radius * 0.035, radius * 0.035, radius * 0.045, 16]} />
+              <meshStandardMaterial color={spacecraft.accent} metalness={0.7} roughness={0.24} />
+            </mesh>
+            <mesh position={[0, 0, radius * 0.09]}>
+              <sphereGeometry args={[radius * 0.018, 12, 8]} />
+              <meshStandardMaterial color="#c9f4ff" emissive="#5acfff" emissiveIntensity={0.35} />
+            </mesh>
+          </group>
+        )
+      })}
     </>
   )
 }
@@ -273,7 +393,7 @@ function ModelFramer({
     })
     controlsRef.current?.target.set(0, 0, 0)
     controlsRef.current?.update()
-  }, [build, camera, disassembled, model, modelRadius, size.height, size.width])
+  }, [camera, model, modelRadius, size.height, size.width])
 
   return (
     <>

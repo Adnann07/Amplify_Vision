@@ -1,6 +1,6 @@
 import type { LaunchRecord, LaunchVehicleSpec } from '../../data/launchVehicles'
 import { assessLaunchOutcome } from '../../data/launchOutcome'
-import { lazy, Suspense, useCallback, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import type { MissionRequirementResult } from '../../data/missionGoals'
 import { resolveFlightDestination } from './missionFlightPath'
 
@@ -89,7 +89,7 @@ export function LaunchVehicleSelection({
     : null
 
   return (
-    <div className="space-y-6">
+    <div id="launch-vehicle-selection" className="space-y-6 scroll-mt-5">
       <section className="rounded-[30px] border border-sky-300/15 bg-slate-900/80 p-5 shadow-[0_15px_55px_rgba(15,23,42,0.45)] sm:p-7">
         <div className="flex flex-col gap-4 border-b border-white/10 pb-5 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -339,6 +339,7 @@ export function LaunchResults({
   onEnterMissionControl,
   startInDemoMode,
 }: LaunchResultsProps) {
+  const resultsRef = useRef<HTMLElement>(null)
   const [showSuccessDemo, setShowSuccessDemo] = useState(startInDemoMode)
   const [completedSequenceKey, setCompletedSequenceKey] = useState<string | null>(null)
   const sequenceKey = `${record.attemptId}:${showSuccessDemo ? 'success-demo' : 'actual'}`
@@ -389,8 +390,19 @@ export function LaunchResults({
               : `STABLE ORBIT AROUND ${configuredDestination.name.toLocaleUpperCase()} · LAUNCH SUCCESSFUL`
       : 'Launch and mission sequence in progress'
 
+  useEffect(() => {
+    const resultsElement = resultsRef.current
+    if (!resultsElement) return
+
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    resultsElement.scrollIntoView({
+      behavior: reducedMotion ? 'instant' : 'smooth',
+      block: 'start',
+    })
+  }, [record.attemptId])
+
   return (
-    <section className={`rounded-[30px] border ${failed ? 'border-rose-300/20' : 'border-emerald-300/20'} bg-slate-900/80 p-5 shadow-[0_15px_55px_rgba(15,23,42,0.45)] sm:p-8`}>
+    <section ref={resultsRef} className={`scroll-mt-6 rounded-[30px] border ${failed ? 'border-rose-300/20' : 'border-emerald-300/20'} bg-slate-900/80 p-5 shadow-[0_15px_55px_rgba(15,23,42,0.45)] sm:p-8`}>
       <p className={`text-[10px] font-semibold uppercase tracking-[0.3em] ${failed ? 'text-rose-200/80' : 'text-emerald-200/80'}`}>
         Launch results
       </p>

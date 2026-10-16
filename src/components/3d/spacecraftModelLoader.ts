@@ -116,10 +116,12 @@ function centerGeometry(source: BufferGeometry) {
   return geometry
 }
 
-function componentForPath(path: string): BuildComponentId | undefined {
+function componentForPath(path: string, spacecraftId?: string): BuildComponentId | undefined {
   const name = path.toLowerCase()
   if (name.includes('dish') || name.includes('antenna')) return 'antenna'
   if (name.includes('wing') || name.includes('solar')) return 'solarPanel'
+  if (name.includes('engine') || name.includes('thruster') || name.includes('propulsion')) return 'engine'
+  if (spacecraftId === 'cassini' && name.endsWith('/bottom.stl')) return 'engine'
   if (name.includes('instrument') || name.includes('sensor')) return 'instrument'
   return undefined
 }
@@ -174,7 +176,7 @@ export async function loadSpacecraftModel(spacecraft: SpacecraftSpec): Promise<L
     root.add(gltf.scene)
     root.traverse((object) => {
       if (object instanceof Mesh) {
-        object.userData.component = componentForPath(object.name)
+        object.userData.component = componentForPath(object.name, spacecraft.id)
       }
     })
     return { root, dispose: () => disposeObject(root) }
@@ -216,7 +218,7 @@ export async function loadSpacecraftModel(spacecraft: SpacecraftSpec): Promise<L
       const mesh = new Mesh(centerGeometry(source), material)
       mesh.position.set(...part.position)
       mesh.rotation.set(...part.rotation)
-      mesh.userData.component = componentForPath(part.path)
+      mesh.userData.component = componentForPath(part.path, spacecraft.id)
       mesh.castShadow = true
       mesh.receiveShadow = true
       root.add(mesh)
