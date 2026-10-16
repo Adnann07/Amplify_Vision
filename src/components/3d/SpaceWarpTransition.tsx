@@ -1,4 +1,4 @@
-import { Canvas, useFrame } from '@react-three/fiber'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { motion, useReducedMotion } from 'framer-motion'
 import { Box3, BufferGeometry, type BufferAttribute } from 'three'
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
@@ -13,8 +13,9 @@ const SpacecraftOrbitGallery = lazy(() =>
 
 const WARP_DURATION_MS = 3600
 const WARP_FADE_OUT_MS = 800
-const STAR_COUNT = 1100
+const STAR_COUNT = 600
 const FIELD_DEPTH = 70
+const WARP_FRAME_INTERVAL_MS = 1000 / 30
 
 interface PreloadedModels {
   models: Map<string, LoadedModel>
@@ -67,14 +68,22 @@ class StarField {
   }
 }
 
-function WarpingStars({ reducedMotion }: { reducedMotion: boolean }) {
+function WarpingStars({ reducedMotion, active }: { reducedMotion: boolean; active: boolean }) {
   const starGeometry = useRef<BufferGeometry>(null)
   const trailGeometry = useRef<BufferGeometry>(null)
   const field = useMemo(() => new StarField(), [])
   const elapsed = useRef(0)
+  const invalidate = useThree((state) => state.invalidate)
+
+  useEffect(() => {
+    if (reducedMotion || !active) return
+    invalidate()
+    const interval = window.setInterval(invalidate, WARP_FRAME_INTERVAL_MS)
+    return () => window.clearInterval(interval)
+  }, [active, invalidate, reducedMotion])
 
   useFrame((_, delta) => {
-    if (reducedMotion) return
+    if (reducedMotion || !active) return
     elapsed.current += delta
     const progress = Math.min(elapsed.current / (WARP_DURATION_MS / 1000), 1)
     field.advance(delta, progress)
@@ -165,7 +174,7 @@ export function SpaceWarpTransition({
     }
 
     void Promise.all(
-      Array.from({ length: Math.min(3, spacecrafts.length) }, () => loadNext()),
+      Array.from({ length: Math.min(2, spacecrafts.length) }, () => loadNext()),
     ).then(() => {
       if (cancelled) return
       transferredModels.current = true
@@ -186,7 +195,7 @@ export function SpaceWarpTransition({
 
   return (
     <>
-      {preloaded && (
+      {preloaded && warpFinished && (
         <Suspense fallback={null}>
           <SpacecraftOrbitGallery
             selectedId={selectedId}
@@ -216,11 +225,15 @@ export function SpaceWarpTransition({
           <Canvas
             aria-hidden="true"
             camera={{ position: [0, 0, 0], fov: 68, near: 0.1, far: 100 }}
-            dpr={[1, 1.5]}
+            dpr={0.85}
+            frameloop="demand"
             gl={{ alpha: false, antialias: false, powerPreference: 'low-power' }}
           >
             <color attach="background" args={['#020711']} />
-            <WarpingStars reducedMotion={Boolean(reducedMotion)} />
+            <WarpingStars
+              reducedMotion={Boolean(reducedMotion)}
+              active={!galleryReady}
+            />
           </Canvas>
         </motion.main>
       )}
