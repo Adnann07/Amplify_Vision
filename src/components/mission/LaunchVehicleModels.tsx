@@ -3,6 +3,11 @@ import { useFrame } from '@react-three/fiber'
 import { useLoader } from '@react-three/fiber'
 import { DoubleSide, Group } from 'three'
 import { STLLoader } from 'three/addons/loaders/STLLoader.js'
+import {
+  FAIRING_SEPARATION_TIME,
+  isStageSeparationReady,
+  STAGE_SEPARATION_TIME,
+} from './launchSequenceState'
 
 export type LaunchVehicleClass = 'small' | 'medium' | 'heavy'
 
@@ -36,10 +41,12 @@ export function NasaSlsRocket({
 export function ProceduralRocket({
   variant,
   startedAt = null,
+  spaceMix,
   onReady,
 }: {
   variant: LaunchVehicleClass
   startedAt?: number | null
+  spaceMix?: { current: number }
   onReady: () => void
 }) {
   const height = variant === 'small' ? 66 : variant === 'medium' ? 79 : 93
@@ -56,8 +63,10 @@ export function ProceduralRocket({
   useEffect(() => onReady(), [onReady])
   useFrame(() => {
     const elapsed = startedAt === null ? 0 : Math.max(0, performance.now() / 1000 - startedAt)
-    const stageProgress = Math.max(0, Math.min(1, (elapsed - 5.8) / 0.9))
-    const fairingProgress = Math.max(0, Math.min(1, (elapsed - 7) / 0.7))
+    const stageProgress = isStageSeparationReady(elapsed, spaceMix?.current ?? 0)
+      ? Math.max(0, Math.min(1, (elapsed - STAGE_SEPARATION_TIME) / 0.9))
+      : 0
+    const fairingProgress = Math.max(0, Math.min(1, (elapsed - FAIRING_SEPARATION_TIME) / 0.7))
     if (lowerStage.current) {
       lowerStage.current.position.set(stageProgress * -2, -stageProgress * 24, 0)
       lowerStage.current.visible = stageProgress < 0.94

@@ -7,9 +7,11 @@ export type SequencePhase =
   | 'ascent'
   | 'stage_separation'
   | 'fairing_separation'
+  | 'leo_coast'
   | 'spacecraft_deployment'
   | 'spacecraft_initialization'
   | 'mission_active'
+  | 'tli_burn'
   | 'departure'
   | 'transfer'
   | 'approach'
@@ -21,51 +23,79 @@ export type SequencePhase =
   | 'anomaly'
   | 'complete'
 
-export const LAUNCH_SEQUENCE_DURATION = 13
-export const STABLE_ORBIT_TIME = 32
-export const MISSION_COMPLETE_TIME = 30
-export const CONFIGURATION_ERROR_TIME = 14
+export const LIFTOFF_TIME = 4.1
+export const SPACE_TRANSITION_START_TIME = 18
+export const STAGE_SEPARATION_TIME = 21
+export const FAIRING_SEPARATION_TIME = 23
+export const ASCENT_COMPLETE_TIME = 24
+export const SPACECRAFT_DEPLOYMENT_TIME = 26.5
+export const SPACECRAFT_INITIALIZATION_TIME = 28.5
+export const MISSION_ACTIVE_TIME = 29.5
+export const TLI_BURN_TIME = 32
+export const DEPARTURE_TIME = 35
+export const TRANSFER_START_TIME = 37
+export const ARRIVAL_TIME = 45
+export const ORBITAL_INSERTION_TIME = 49
+export const STABLE_ORBIT_TIME = 55
+export const MISSION_COMPLETE_TIME = 51
+export const CONFIGURATION_ERROR_TIME = 32
+export const LAUNCH_FAILURE_TIME = 6.35
+export const LAUNCH_FAILURE_COMPLETE_TIME = 13
+export const MISSION_FAILURE_TIME = 31
+export const MISSION_FAILURE_COMPLETE_TIME = 35
+export const ORBITAL_SPACE_MIX = 0.995
+
+export function isStageSeparationReady(elapsed: number, spaceMix: number) {
+  return elapsed >= STAGE_SEPARATION_TIME && spaceMix >= ORBITAL_SPACE_MIX
+}
+
+export function isSpacecraftDeploymentReady(elapsed: number, spaceMix: number) {
+  return elapsed >= SPACECRAFT_DEPLOYMENT_TIME && spaceMix >= ORBITAL_SPACE_MIX
+}
 
 const ASCENT_PHASES: { at: number; phase: SequencePhase }[] = [
   { at: 0, phase: 'countdown3' },
   { at: 0.85, phase: 'countdown2' },
   { at: 1.7, phase: 'countdown1' },
   { at: 2.55, phase: 'ignition' },
-  { at: 4.1, phase: 'ascent' },
-  { at: 5.8, phase: 'stage_separation' },
-  { at: 7, phase: 'fairing_separation' },
-  { at: 8.1, phase: 'spacecraft_deployment' },
-  { at: 9.35, phase: 'spacecraft_initialization' },
-  { at: 11, phase: 'mission_active' },
+  { at: LIFTOFF_TIME, phase: 'ascent' },
+  { at: STAGE_SEPARATION_TIME, phase: 'stage_separation' },
+  { at: FAIRING_SEPARATION_TIME, phase: 'fairing_separation' },
+  { at: ASCENT_COMPLETE_TIME, phase: 'leo_coast' },
+  { at: SPACECRAFT_DEPLOYMENT_TIME, phase: 'spacecraft_deployment' },
+  { at: SPACECRAFT_INITIALIZATION_TIME, phase: 'spacecraft_initialization' },
+  { at: MISSION_ACTIVE_TIME, phase: 'mission_active' },
 ]
 
 const FAILURE_PHASES: { at: number; phase: SequencePhase }[] = [
-  ...ASCENT_PHASES.filter(({ at }) => at < 5.8),
-  { at: 6.35, phase: 'anomaly' },
-  { at: LAUNCH_SEQUENCE_DURATION, phase: 'complete' },
+  ...ASCENT_PHASES.filter(({ at }) => at < LAUNCH_FAILURE_TIME),
+  { at: LAUNCH_FAILURE_TIME, phase: 'anomaly' },
+  { at: LAUNCH_FAILURE_COMPLETE_TIME, phase: 'complete' },
 ]
 
 const MISSION_FAILURE_PHASES: { at: number; phase: SequencePhase }[] = [
-  ...ASCENT_PHASES.filter(({ at }) => at < 11),
-  { at: 11, phase: 'anomaly' },
-  { at: LAUNCH_SEQUENCE_DURATION, phase: 'complete' },
+  ...ASCENT_PHASES.filter(({ at }) => at < MISSION_FAILURE_TIME),
+  { at: MISSION_FAILURE_TIME, phase: 'anomaly' },
+  { at: MISSION_FAILURE_COMPLETE_TIME, phase: 'complete' },
 ]
 
 const ORBITAL_MISSION_PHASES: { at: number; phase: SequencePhase }[] = [
   ...ASCENT_PHASES,
-  { at: 13, phase: 'departure' },
-  { at: 15, phase: 'transfer' },
-  { at: 22, phase: 'approach' },
-  { at: 27, phase: 'orbital_insertion' },
+  { at: TLI_BURN_TIME, phase: 'tli_burn' },
+  { at: DEPARTURE_TIME, phase: 'departure' },
+  { at: TRANSFER_START_TIME, phase: 'transfer' },
+  { at: ARRIVAL_TIME, phase: 'approach' },
+  { at: ORBITAL_INSERTION_TIME, phase: 'orbital_insertion' },
   { at: STABLE_ORBIT_TIME, phase: 'stable_orbit' },
 ]
 
 const FLYBY_MISSION_PHASES: { at: number; phase: SequencePhase }[] = [
   ...ASCENT_PHASES,
-  { at: 13, phase: 'departure' },
-  { at: 15, phase: 'transfer' },
-  { at: 22, phase: 'approach' },
-  { at: 27, phase: 'planetary_flyby' },
+  { at: TLI_BURN_TIME, phase: 'tli_burn' },
+  { at: DEPARTURE_TIME, phase: 'departure' },
+  { at: TRANSFER_START_TIME, phase: 'transfer' },
+  { at: ARRIVAL_TIME, phase: 'approach' },
+  { at: ORBITAL_INSERTION_TIME, phase: 'planetary_flyby' },
   { at: MISSION_COMPLETE_TIME, phase: 'mission_complete' },
 ]
 
