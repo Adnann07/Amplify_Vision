@@ -1,5 +1,6 @@
 import {
   BufferGeometry,
+  BufferAttribute,
   Float32BufferAttribute,
   Group,
   Material,
@@ -10,9 +11,73 @@ import {
 } from 'three'
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
-import { STLLoader } from 'three/addons/loaders/STLLoader.js'
 import type { SpacecraftSpec } from '../../data/spacecraft'
 import type { BuildComponentId } from '../../data/spacecraftBuild'
+
+type StlWorkerResponse =
+  | { id: number; position: Float32Array; normal?: Float32Array }
+  | { id: number; error: string }
+
+const stlWorkerRequests = new Map<
+  number,
+  { resolve: (geometry: BufferGeometry) => void; reject: (error: Error) => void }
+>()
+let stlWorker: Worker | null = null
+let nextStlRequestId = 0
+
+function getStlWorker() {
+  if (stlWorker) return stlWorker
+
+  const worker = new Worker(new URL('./stlGeometryWorker.ts', import.meta.url), {
+    type: 'module',
+  })
+  worker.onmessage = ({ data }: MessageEvent<StlWorkerResponse>) => {
+    const request = stlWorkerRequests.get(data.id)
+    if (!request) return
+    stlWorkerRequests.delete(data.id)
+
+    if ('error' in data) {
+      request.reject(new Error(data.error))
+      return
+    }
+
+    const geometry = new BufferGeometry()
+    geometry.setAttribute('position', new Float32BufferAttribute(data.position, 3))
+    if (data.normal) geometry.setAttribute('normal', new BufferAttribute(data.normal, 3))
+    geometry.computeBoundingBox()
+    request.resolve(geometry)
+  }
+  worker.onerror = (event) => {
+    const error = new Error(event.message || 'STL model worker failed.')
+    worker.terminate()
+    if (stlWorker === worker) stlWorker = null
+    stlWorkerRequests.forEach((request) => request.reject(error))
+    stlWorkerRequests.clear()
+  }
+  stlWorker = worker
+  return worker
+}
+
+function loadStlGeometry(path: string) {
+  return new Promise<BufferGeometry>((resolve, reject) => {
+    let worker: Worker
+    try {
+      worker = getStlWorker()
+    } catch (error) {
+      reject(error instanceof Error ? error : new Error(String(error)))
+      return
+    }
+
+    const id = ++nextStlRequestId
+    stlWorkerRequests.set(id, { resolve, reject })
+    try {
+      worker.postMessage({ id, path })
+    } catch (error) {
+      stlWorkerRequests.delete(id)
+      reject(error instanceof Error ? error : new Error(String(error)))
+    }
+  })
+}
 
 export interface LoadedModel {
   root: Group
@@ -115,14 +180,13 @@ export async function loadSpacecraftModel(spacecraft: SpacecraftSpec): Promise<L
     return { root, dispose: () => disposeObject(root) }
   }
 
-  const stlLoader = new STLLoader()
   const paths = [
     ...new Set([
       ...model.parts.map((part) => part.path),
       ...(model.solarWings ? [model.solarWings.path] : []),
     ]),
   ]
-  const results = await Promise.allSettled(paths.map((path) => stlLoader.loadAsync(path)))
+  const results = await Promise.allSettled(paths.map(loadStlGeometry))
   const failedResult = results.find(
     (result): result is PromiseRejectedResult => result.status === 'rejected',
   )

@@ -1,0 +1,175 @@
+.hyperspace-transition {
+  position: fixed;
+  z-index: 10000;
+  overflow: hidden;
+  inset: 0;
+  isolation: isolate;
+  opacity: 1;
+  background:
+    radial-gradient(ellipse at 50% 48%, #03060a 0%, #010204 52%, #000 100%);
+  pointer-events: none;
+  transition: opacity 800ms ease-in-out;
+}
+
+.hyperspace-transition.is-exiting {
+  opacity: 0;
+}
+
+.hyperspace-transition::before,
+.hyperspace-transition::after {
+  position: absolute;
+  inset: -50%;
+  content: '';
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+
+.hyperspace-transition::before {
+  z-index: 1;
+  background:
+    radial-gradient(ellipse at center, rgb(220 235 255 / 16%) 0%, rgb(109 157 206 / 9%) 7%, transparent 25%),
+    radial-gradient(ellipse at center, transparent 18%, rgb(197 223 255 / 8%) 18.3%, transparent 18.7%, transparent 30%, rgb(161 195 234 / 6%) 30.3%, transparent 30.7%);
+  opacity: 0;
+  animation: hyperspace-core 3.6s ease-out both;
+}
+
+.hyperspace-transition::after {
+  z-index: 2;
+  inset: -80%;
+  background:
+    repeating-conic-gradient(from 2.2deg at 50% 50%, transparent 0deg 5.3deg, rgb(208 224 245 / 14%) 5.34deg 5.42deg, transparent 5.47deg 10.7deg),
+    repeating-conic-gradient(from 0deg at 50% 50%, transparent 0deg 13deg, rgb(255 255 255 / 10%) 13.04deg 13.09deg, transparent 13.14deg 26deg);
+  mask-image: radial-gradient(ellipse at center, transparent 0%, transparent 8%, #000 13%, #000 43%, transparent 76%);
+  opacity: 0;
+  transform: scale(0.12);
+  animation: hyperspace-rays 3.6s cubic-bezier(0.12, 0.76, 0.18, 1) both;
+}
+
+.hyperspace-transition__stars {
+  position: absolute;
+  inset: -40%;
+  background-repeat: repeat;
+  background-position: center;
+  transform: scale(0.12);
+  will-change: transform, opacity;
+}
+
+.hyperspace-transition__stars--distant {
+  background-image:
+    radial-gradient(1px 1px at 17px 23px, rgb(229 237 248 / 88%) 99%, transparent),
+    radial-gradient(1px 1px at 83px 67px, rgb(174 190 211 / 78%) 99%, transparent),
+    radial-gradient(1.5px 1.5px at 139px 119px, rgb(255 255 255 / 94%) 99%, transparent),
+    radial-gradient(1px 1px at 211px 37px, rgb(190 207 229 / 76%) 99%, transparent),
+    radial-gradient(1px 1px at 263px 173px, rgb(220 229 241 / 84%) 99%, transparent);
+  background-size: 290px 220px;
+  opacity: 0.16;
+  animation: hyperspace-expand-distant 3.6s cubic-bezier(0.16, 0.72, 0.24, 1) both;
+}
+
+.hyperspace-transition__stars--mid {
+  background-image:
+    radial-gradient(1.5px 1.5px at 39px 51px, rgb(255 255 255 / 96%) 99%, transparent),
+    radial-gradient(1px 1px at 107px 141px, rgb(193 208 228 / 86%) 99%, transparent),
+    radial-gradient(2px 2px at 193px 83px, rgb(238 245 255 / 94%) 99%, transparent),
+    radial-gradient(1px 1px at 251px 197px, rgb(167 184 207 / 82%) 99%, transparent),
+    radial-gradient(1px 1px at 311px 31px, rgb(255 255 255 / 92%) 99%, transparent);
+  background-size: 340px 250px;
+  opacity: 0.1;
+  animation: hyperspace-expand-mid 3.6s cubic-bezier(0.16, 0.72, 0.24, 1) both;
+}
+
+.hyperspace-transition__streaks {
+  position: absolute;
+  z-index: 3;
+  inset: -80%;
+  background:
+    repeating-conic-gradient(from -1.1deg at 50% 50%, transparent 0deg 7.15deg, rgb(238 245 255 / 92%) 7.19deg 7.28deg, transparent 7.34deg 14.3deg),
+    repeating-conic-gradient(from 1.7deg at 50% 50%, transparent 0deg 17.8deg, rgb(178 196 220 / 75%) 17.84deg 17.9deg, transparent 17.96deg 35.6deg),
+    repeating-conic-gradient(from 0deg at 50% 50%, transparent 0deg 31deg, rgb(255 255 255 / 55%) 31.04deg 31.09deg, transparent 31.15deg 62deg);
+  mask-image: radial-gradient(ellipse at center, transparent 0%, transparent 6%, #000 11%, #000 48%, transparent 78%);
+  opacity: 0;
+  transform: scale(0.12);
+  will-change: transform, opacity;
+  animation: hyperspace-streaks 3.6s cubic-bezier(0.12, 0.76, 0.18, 1) both;
+}
+
+.hyperspace-transition__core {
+  z-index: 4;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(24vw, 300px);
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgb(219 233 251 / 30%), #fff 50%, rgb(219 233 251 / 30%), transparent);
+  box-shadow: 0 0 18px 5px rgb(210 227 250 / 20%), 0 0 64px 18px rgb(146 176 218 / 13%);
+  opacity: 0;
+  transform: translate(-50%, -50%) scaleX(0.05);
+  will-change: transform, opacity;
+  animation: hyperspace-core-line 3.6s ease-in both;
+}
+
+@keyframes hyperspace-expand-distant {
+  0% { opacity: 0.16; transform: scale(0.12); }
+  16% { opacity: 0.38; }
+  72% { opacity: 0.84; }
+  100% { opacity: 0; transform: scale(1.72); }
+}
+
+@keyframes hyperspace-expand-mid {
+  0% { opacity: 0.1; transform: scale(0.12); }
+  23% { opacity: 0.28; }
+  74% { opacity: 0.76; }
+  100% { opacity: 0; transform: scale(2.05); }
+}
+
+@keyframes hyperspace-rays {
+  0%, 8% { opacity: 0; transform: scale(0.12); }
+  42% { opacity: 0.38; }
+  70% { opacity: 0.64; transform: scale(0.76); }
+  100% { opacity: 0; transform: scale(1.6); }
+}
+
+@keyframes hyperspace-streaks {
+  0%, 12% { opacity: 0; transform: scale(0.12); }
+  34% { opacity: 0.52; transform: scale(0.36); }
+  68% { opacity: 0.96; transform: scale(0.86); }
+  100% { opacity: 0; transform: scale(1.76); }
+}
+
+@keyframes hyperspace-core {
+  0%, 27% { opacity: 0; transform: scale(0.5); }
+  68% { opacity: 0.74; transform: scale(0.92); }
+  100% { opacity: 0; transform: scale(1.28); }
+}
+
+@keyframes hyperspace-core-line {
+  0%, 42% { opacity: 0; transform: translate(-50%, -50%) scaleX(0.05); }
+  72% { opacity: 0.7; transform: translate(-50%, -50%) scaleX(0.82); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scaleX(1.35); }
+}
+
+.hyperspace-transition.is-reduced-motion {
+  transition-duration: 100ms;
+}
+
+.hyperspace-transition.is-reduced-motion::before,
+.hyperspace-transition.is-reduced-motion::after,
+.hyperspace-transition.is-reduced-motion .hyperspace-transition__stars,
+.hyperspace-transition.is-reduced-motion .hyperspace-transition__streaks,
+.hyperspace-transition.is-reduced-motion .hyperspace-transition__core {
+  animation: none;
+  will-change: auto;
+}
+
+.hyperspace-transition.is-reduced-motion::before {
+  opacity: 0.34;
+  transform: none;
+}
+
+.hyperspace-transition.is-reduced-motion::after,
+.hyperspace-transition.is-reduced-motion .hyperspace-transition__stars,
+.hyperspace-transition.is-reduced-motion .hyperspace-transition__streaks,
+.hyperspace-transition.is-reduced-motion .hyperspace-transition__core {
+  opacity: 0.32;
+  transform: none;
+}

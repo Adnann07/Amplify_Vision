@@ -1,6 +1,6 @@
 import { Stars } from '@react-three/drei'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { motion, useReducedMotion } from 'framer-motion'
+import { motion } from 'framer-motion'
 import {
   AdditiveBlending,
   BackSide,
@@ -17,6 +17,7 @@ import {
 import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { availableSpacecraftCatalog } from '../../data/spacecraft'
+import { useAppReducedMotion } from '../../utils/useAppReducedMotion'
 import { loadSpacecraftModel, type LoadedModel } from './spacecraftModelLoader'
 import {
   SpacecraftInformationBranches,
@@ -32,12 +33,14 @@ interface SpacecraftOrbitGalleryProps {
   preloadedModels?: Map<string, LoadedModel>
   initialLoadErrors?: string[]
   onCanvasReady?: () => void
+  onCanvasFailure?: () => void
   onClose: () => void
   onSelect: (spacecraft: AvailableSpacecraft) => void
 }
 
 interface GalleryCanvasBoundaryProps {
   children: ReactNode
+  onFailure: () => void
 }
 
 interface GalleryCanvasBoundaryState {
@@ -48,6 +51,7 @@ const FOCUS_DURATION = 0.9
 const FOCUSED_MODEL_SCALE = 2.8
 const FOCUSED_MODEL_SCREEN_FRACTION = 0.76
 const DIM_DURATION = 0.65
+const CANVAS_READY_TIMEOUT_MS = 10_000
 
 function easeInOutCubic(t: number) {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
@@ -77,6 +81,7 @@ class GalleryCanvasBoundary extends Component<
 
   componentDidCatch(error: Error) {
     console.error('Spacecraft gallery 3D renderer failed.', error)
+    this.props.onFailure()
   }
 
   render() {
@@ -86,6 +91,7 @@ class GalleryCanvasBoundary extends Component<
 
 function createSilhouette(root: Group) {
   const silhouette = root.clone(true)
+  silhouette.visible = false
   const materials: MeshBasicMaterial[] = []
 
   silhouette.traverse((object) => {
@@ -178,6 +184,14 @@ function OrbitingModel({
     })
     return materials
   }, [model])
+
+  useLayoutEffect(() => {
+    const showHighlight = highlighted && !focused && !dimmed
+    emissiveMaterials.forEach(({ material, color, intensity }) => {
+      material.emissive.copy(color).lerp(highlightColor, showHighlight ? 0.34 : 0)
+      material.emissiveIntensity = intensity + (showHighlight ? 0.24 : 0)
+    })
+  }, [dimmed, emissiveMaterials, focused, highlighted, highlightColor])
 
   useEffect(() => () => silhouette.dispose(), [silhouette])
 
@@ -277,14 +291,12 @@ function OrbitingModel({
     const showHighlight = highlighted && !focused && !dimmed
     const targetOpacity = showHighlight ? 0.42 : 0
     outlineOpacity.current += (targetOpacity - outlineOpacity.current) * (1 - Math.exp(-delta * 7))
-    silhouette.materials.forEach((material) => {
-      material.opacity = outlineOpacity.current
-      material.visible = outlineOpacity.current > 0.01
-    })
-    emissiveMaterials.forEach(({ material, color, intensity }) => {
-      material.emissive.copy(color).lerp(highlightColor, showHighlight ? 0.34 : 0)
-      material.emissiveIntensity = intensity + (showHighlight ? 0.24 : 0)
-    })
+    silhouette.root.visible = outlineOpacity.current > 0.01
+    if (silhouette.root.visible) {
+      silhouette.materials.forEach((material) => {
+        material.opacity = outlineOpacity.current
+      })
+    }
   })
 
   return (
@@ -458,13 +470,16 @@ export function SpacecraftOrbitGallery({
   preloadedModels,
   initialLoadErrors,
   onCanvasReady,
+  onCanvasFailure,
   onClose,
   onSelect,
 }: SpacecraftOrbitGalleryProps) {
   const [models, setModels] = useState<Map<string, LoadedModel>>(
-    () => preloadedModels ?? (selectedModel ? new Map([[selectedId, selectedModel]]) : new Map()),
+    () => selectedModel ? new Map([[selectedId, selectedModel]]) : new Map(),
   )
   const [loadErrors, setLoadErrors] = useState<string[]>(initialLoadErrors ?? [])
+  const displayedModels = preloadedModels ?? models
+  const displayedLoadErrors = initialLoadErrors ?? loadErrors
   const [loading, setLoading] = useState(!preloadedModels)
   const [highlightedId, setHighlightedId] = useState<string | null>(null)
   const [selectedSpacecraftId, setSelectedSpacecraftId] = useState<string | null>(null)
@@ -483,11 +498,47 @@ export function SpacecraftOrbitGallery({
   const closeTimer = useRef<number | null>(null)
   const preloadedDisposeTimer = useRef<number | null>(null)
   const callbacks = useRef({ onClose, onSelect })
-  const reducedMotion = useReducedMotion()
+  const canvasReady = useRef(false)
+  const canvasUnavailableRef = useRef(false)
+  const canvasReadyTimeout = useRef<number | null>(null)
+  const [canvasUnavailable, setCanvasUnavailable] = useState(false)
+  const reducedMotion = useAppReducedMotion()
 
   useEffect(() => {
     callbacks.current = { onClose, onSelect }
   }, [onClose, onSelect])
+
+  const markCanvasReady = useCallback(() => {
+    if (canvasUnavailableRef.current) return
+    canvasReady.current = true
+    if (canvasReadyTimeout.current !== null) {
+      window.clearTimeout(canvasReadyTimeout.current)
+      canvasReadyTimeout.current = null
+    }
+    onCanvasReady?.()
+  }, [onCanvasReady])
+
+  const markCanvasUnavailable = useCallback(() => {
+    if (canvasReady.current || canvasUnavailableRef.current) return
+    canvasUnavailableRef.current = true
+    if (canvasReadyTimeout.current !== null) {
+      window.clearTimeout(canvasReadyTimeout.current)
+      canvasReadyTimeout.current = null
+    }
+    setCanvasUnavailable(true)
+    onCanvasFailure?.()
+  }, [onCanvasFailure])
+
+  useEffect(() => {
+    if (canvasReady.current || canvasUnavailableRef.current) return
+    canvasReadyTimeout.current = window.setTimeout(markCanvasUnavailable, CANVAS_READY_TIMEOUT_MS)
+    return () => {
+      if (canvasReadyTimeout.current !== null) {
+        window.clearTimeout(canvasReadyTimeout.current)
+        canvasReadyTimeout.current = null
+      }
+    }
+  }, [markCanvasUnavailable])
 
   const setHighlight = useCallback((id: string | null) => {
     setHighlightedId(id)
@@ -615,39 +666,65 @@ export function SpacecraftOrbitGallery({
       role="dialog"
       aria-modal="true"
       aria-label="Spacecraft model selection"
-      data-model-count={models.size}
-      data-model-load-errors={loadErrors.join(',')}
+      data-model-count={displayedModels.size}
+      data-model-load-errors={displayedLoadErrors.join(',')}
       data-highlighted-model={highlightedId ?? focusedId ?? ''}
       initial={reducedMotion ? false : { opacity: 0 }}
       animate={{ opacity: closing ? 0 : 1 }}
       transition={{ duration: reducedMotion ? 0 : 0.72, ease: 'easeInOut' }}
       onPointerLeave={() => setHighlight(null)}
     >
-      <GalleryCanvasBoundary>
-        <Canvas
-          aria-hidden="true"
-          camera={{ position: [0, 0, 8], fov: 48 }}
-          dpr={[1, 1.25]}
-          gl={{ alpha: false, antialias: true, powerPreference: 'low-power' }}
-          onCreated={onCanvasReady}
-          onPointerMissed={() => setHighlight(null)}
-        >
-          <OrbitingFleet
-            models={models}
-            highlightedId={highlightedId ?? (selectedSpacecraftId ? null : focusedId)}
-            selectedId={selectedSpacecraftId}
-            reducedMotion={Boolean(reducedMotion)}
-            focusedModelRef={focusedModelRef}
-            branchModelRef={branchModelRef}
-            cameraRef={cameraRef}
-            onHighlight={setHighlight}
-            onSelect={(spacecraft) => {
-              setHighlight(null)
-              setSelectedSpacecraftId(spacecraft.id)
-            }}
-          />
-        </Canvas>
-      </GalleryCanvasBoundary>
+      {canvasUnavailable ? (
+        <div className="absolute inset-0 z-[1] flex items-center justify-center overflow-y-auto bg-[radial-gradient(ellipse_at_center,_#0b1d30_0%,_#020711_72%)] px-5 py-24">
+          <div className="w-full max-w-3xl">
+            <p className="mb-2 text-center text-xs font-medium uppercase tracking-[0.24em] text-sky-200/65">
+              3D preview unavailable
+            </p>
+            <p className="mb-8 text-center text-sm text-slate-300/75">
+              Choose a spacecraft from the list to continue.
+            </p>
+            <div className="grid max-h-[55vh] grid-cols-1 gap-3 overflow-y-auto sm:grid-cols-2">
+              {availableSpacecraftCatalog.map((spacecraft) => (
+                <button
+                  key={spacecraft.id}
+                  type="button"
+                  onClick={() => setSelectedSpacecraftId(spacecraft.id)}
+                  className="rounded-lg border border-white/10 bg-white/[0.035] px-4 py-3 text-left transition hover:border-sky-200/45 hover:bg-sky-200/[0.07] focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-200"
+                >
+                  <span className="block text-sm font-medium text-white/90">{spacecraft.name}</span>
+                  <span className="mt-1 block text-xs text-slate-400">{spacecraft.type}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <GalleryCanvasBoundary onFailure={markCanvasUnavailable}>
+          <Canvas
+            aria-hidden="true"
+            camera={{ position: [0, 0, 8], fov: 48 }}
+            dpr={[0.85, 1]}
+            gl={{ alpha: false, antialias: false, powerPreference: 'low-power' }}
+            onCreated={markCanvasReady}
+            onPointerMissed={() => setHighlight(null)}
+          >
+            <OrbitingFleet
+              models={displayedModels}
+              highlightedId={highlightedId ?? (selectedSpacecraftId ? null : focusedId)}
+              selectedId={selectedSpacecraftId}
+              reducedMotion={Boolean(reducedMotion)}
+              focusedModelRef={focusedModelRef}
+              branchModelRef={branchModelRef}
+              cameraRef={cameraRef}
+              onHighlight={setHighlight}
+              onSelect={(spacecraft) => {
+                setHighlight(null)
+                setSelectedSpacecraftId(spacecraft.id)
+              }}
+            />
+          </Canvas>
+        </GalleryCanvasBoundary>
+      )}
 
       {selectedSpacecraft && (
         <div
