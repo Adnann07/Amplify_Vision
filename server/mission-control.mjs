@@ -576,6 +576,10 @@ function deduplicateSources(sources) {
 }
 
 function getClientId(request) {
+  const forwarded = request.headers?.['x-forwarded-for']
+  if (typeof forwarded === 'string' && forwarded.length > 0) {
+    return forwarded.split(',')[0].trim()
+  }
   return request.socket?.remoteAddress ?? 'unknown'
 }
 
@@ -600,6 +604,16 @@ async function readJsonBody(request) {
   const contentType = request.headers['content-type']
   if (typeof contentType !== 'string' || !/^application\/json(?:\s*;|$)/i.test(contentType)) {
     throw new PayloadError('Use Content-Type: application/json.')
+  }
+  if (request.body !== undefined && request.body !== null) {
+    if (typeof request.body === 'object') return request.body
+    if (typeof request.body === 'string') {
+      try {
+        return JSON.parse(request.body)
+      } catch {
+        throw new PayloadError('Send a valid JSON request.')
+      }
+    }
   }
   const declaredLength = Number(request.headers['content-length'] ?? 0)
   if (declaredLength > MAX_REQUEST_BYTES) throw new PayloadError('The request is too large.')
