@@ -446,7 +446,7 @@ export const spacecraftCatalog: SpacecraftSpec[] = [
     accent: '#fb923c',
     missionSourceUrl: 'https://science.nasa.gov/mission/mars-2020-perseverance/',
     gameplayNote:
-      'Mass, power, reliability, and cost are rounded gameplay values, not rover flight specifications. The game does not simulate Mars entry/descent/landing, surface driving, sample caching, or relay coverage.',
+      'Mass, power, reliability, and cost are rounded gameplay values, not rover flight specifications. The visual sequence depicts Mars entry, descent, landing, and rover driving; it does not model the real trajectory, terrain physics, sample caching, or relay coverage.',
     assetAttribution: 'NASA/JPL-Caltech, NASA 3D Resources',
     assetUsageNotes:
       'Mission-specific GLB downloaded from the official NASA-3D-Resources repository; its README describes assets as free and without copyright. Review NASA usage guidance at https://www.nasa.gov/nasa-brand-center/images-and-media.',

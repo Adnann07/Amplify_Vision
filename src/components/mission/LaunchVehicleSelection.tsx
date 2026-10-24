@@ -3,6 +3,7 @@ import { assessLaunchOutcome } from '../../data/launchOutcome'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import type { MissionRequirementResult } from '../../data/missionGoals'
 import { resolveFlightDestination } from './missionFlightPath'
+import { isMarsSurfaceMission } from './launchSequenceState'
 
 const LaunchVehiclePreview = lazy(() =>
   import('./LaunchVehiclePreview').then((module) => ({ default: module.LaunchVehiclePreview })),
@@ -370,24 +371,29 @@ export function LaunchResults({
     record.planningSnapshot.destinationBodyId,
     record.destination,
   )
+  const surfaceMission = isMarsSurfaceMission(record.spacecraftId, configuredDestination?.id)
   const sequenceOutcomeTitle = showSuccessDemo
     ? sequenceComplete
-      ? configuredDestination && missionProfile === 'orbiter'
-        ? `DEMO MISSION SUCCESSFUL · STABLE ORBIT AROUND ${configuredDestination.name.toLocaleUpperCase()}`
-        : configuredDestination && missionProfile === 'flyby'
-          ? `DEMO MISSION SUCCESSFUL · FLYBY COMPLETE AT ${configuredDestination.name.toLocaleUpperCase()}`
-          : 'DEMO MISSION SUCCESSFUL · SPACECRAFT DEPLOYED'
+      ? surfaceMission
+        ? 'DEMO MISSION SUCCESSFUL · LANDED ON MARS'
+        : configuredDestination && missionProfile === 'orbiter'
+          ? `DEMO MISSION SUCCESSFUL · STABLE ORBIT AROUND ${configuredDestination.name.toLocaleUpperCase()}`
+          : configuredDestination && missionProfile === 'flyby'
+            ? `DEMO MISSION SUCCESSFUL · FLYBY COMPLETE AT ${configuredDestination.name.toLocaleUpperCase()}`
+            : 'DEMO MISSION SUCCESSFUL · SPACECRAFT DEPLOYED'
       : 'Demo mission in progress'
     : sequenceComplete
       ? failed
         ? `LAUNCH FAILED — ${record.failureTitle}`
         : missionIssue
           ? `LAUNCH SUCCESSFUL · MISSION FAILED IN SPACE — ${record.failureTitle}`
-          : !configuredDestination || missionProfile === 'planning'
-            ? 'LAUNCH SUCCESSFUL · DESTINATION NOT CONFIGURED'
-            : missionProfile === 'flyby'
-              ? `FLYBY COMPLETE · ${record.destination} · LAUNCH SUCCESSFUL`
-              : `STABLE ORBIT AROUND ${configuredDestination.name.toLocaleUpperCase()} · LAUNCH SUCCESSFUL`
+          : surfaceMission
+            ? 'LANDED ON MARS · LAUNCH SUCCESSFUL'
+            : !configuredDestination || missionProfile === 'planning'
+              ? 'LAUNCH SUCCESSFUL · DESTINATION NOT CONFIGURED'
+              : missionProfile === 'flyby'
+                ? `FLYBY COMPLETE · ${record.destination} · LAUNCH SUCCESSFUL`
+                : `STABLE ORBIT AROUND ${configuredDestination.name.toLocaleUpperCase()} · LAUNCH SUCCESSFUL`
       : 'Launch and mission sequence in progress'
 
   useEffect(() => {
@@ -481,7 +487,9 @@ export function LaunchResults({
                 Successful mission demonstration
               </h3>
               <p className="mt-2 text-sm text-slate-200">
-                This demo shows liftoff, spacecraft deployment, and a successful journey to the configured destination without applying spacecraft optimization failures.
+                {surfaceMission
+                  ? 'This demo shows liftoff, transfer to Mars, and a simplified surface landing without applying spacecraft optimization failures.'
+                  : 'This demo shows liftoff, spacecraft deployment, and a successful journey to the configured destination without applying spacecraft optimization failures.'}
               </p>
               <p className="mt-2 text-xs text-slate-300">
                 It is a visual demonstration only and does not change the recorded launch outcome, mission assessment, or campaign progress.

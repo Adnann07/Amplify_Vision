@@ -14,6 +14,7 @@ import type {
   DirectionalLight,
   Group,
   HemisphereLight,
+  Object3D,
   PerspectiveCamera,
   Sprite,
 } from 'three'
@@ -26,12 +27,14 @@ import {
   LAUNCH_FAILURE_TIME,
   LIFTOFF_TIME,
   MISSION_FAILURE_TIME,
+  ORBITAL_INSERTION_TIME,
   ORBITAL_SPACE_MIX,
   SPACECRAFT_DEPLOYMENT_TIME,
   SPACE_TRANSITION_START_TIME,
   STABLE_ORBIT_TIME,
   TLI_BURN_TIME,
   TRANSFER_START_TIME,
+  isMarsSurfaceMission,
   isTerminalSequencePhase,
   isSpacecraftDeploymentReady,
   sequenceElapsedAt,
@@ -40,6 +43,7 @@ import {
 } from './launchSequenceState'
 import { NasaSlsRocket, ProceduralRocket } from './LaunchVehicleModels'
 import { SpacecraftPayloadModel } from './SpacecraftPayloadModel'
+import { MarsLandingScene } from './MarsLandingScene'
 import {
   getOrbitPosition,
   getTransferPosition,
@@ -308,8 +312,13 @@ function LaunchWorld({
   const rocketRoot = useRef<Group>(null)
   const attachedPayload = useRef<Group>(null)
   const deployedPayload = useRef<Group>(null)
+  const payloadModel = useRef<Group>(null)
+  const payloadExtras = useRef<Group>(null)
   const groundGroup = useRef<Group>(null)
   const earthGroup = useRef<Group>(null)
+  const skyBackdropGroup = useRef<Group>(null)
+  const cloudLayerGroup = useRef<Group>(null)
+  const destinationPlanetGroup = useRef<Group>(null)
   const thrustGlow = useRef<Sprite>(null)
   const ambientLight = useRef<AmbientLight>(null)
   const hemisphereLight = useRef<HemisphereLight>(null)
@@ -339,6 +348,15 @@ function LaunchWorld({
   const previousPayload = useRef(new Vector3())
   const hasPreviousPayload = useRef(false)
   const worldUp = useMemo(() => new Vector3(0, 1, 0), [])
+  const surfaceNormal = useMemo(() => new Vector3(0.45, 0.72, 0.53).normalize(), [])
+  const surfaceTangent = useMemo(() => new Vector3(0.85, -0.53, 0).normalize(), [])
+  const surfaceDirection = useMemo(() => new Vector3(), [])
+  const surfaceForward = useMemo(() => new Vector3(), [])
+  const surfaceLookTarget = useMemo(() => new Vector3(), [])
+  const ingenuityRotors = useRef<{ first: Object3D | null; second: Object3D | null }>({
+    first: null,
+    second: null,
+  })
 
   const spaceMix = useRef(0)
   const rocketState = useRef<RocketState>({ y: 0, scale: 1 })
@@ -362,6 +380,7 @@ function LaunchWorld({
     ),
     [record.destination, record.planningSnapshot.destinationBodyId, record.planningSnapshot.destinationId],
   )
+  const surfaceMission = isMarsSurfaceMission(record.spacecraftId, destination?.id)
   const destinationTarget = useMemo(
     () => destination ? new Vector3(destination.center.x, destination.center.y, destination.center.z) : new Vector3(),
     [destination],
@@ -391,6 +410,8 @@ function LaunchWorld({
     phase === 'approach' ||
     phase === 'orbital_insertion' ||
     phase === 'stable_orbit' ||
+    phase === 'surface_landing' ||
+    phase === 'surface_operations' ||
     phase === 'planetary_flyby' ||
     phase === 'mission_complete'
 
@@ -468,7 +489,51 @@ function LaunchWorld({
             z: destination.center.z,
           }
           let desiredYaw: number | null = null
-          if (missionProfile === 'flyby' && (phase === 'planetary_flyby' || phase === 'mission_complete')) {
+          if (surfaceMission && phase === 'surface_landing' && destination) {
+            const landingProgress = smoothstep(
+              0,
+              1,
+              clamp01((elapsed - ORBITAL_INSERTION_TIME) / (STABLE_ORBIT_TIME - ORBITAL_INSERTION_TIME)),
+            )
+            surfaceDirection
+              .set(1, 0, 0)
+              .lerp(surfaceNormal, landingProgress)
+              .normalize()
+            const landingRadius = lerp(orbitRadius, destination.radius + 4, landingProgress)
+            payload.position
+              .copy(destinationTarget)
+              .addScaledVector(surfaceDirection, landingRadius)
+            payload.up.copy(surfaceDirection)
+            surfaceForward.crossVectors(worldUp, surfaceDirection).normalize()
+            surfaceLookTarget.copy(payload.position).add(surfaceForward)
+            payload.lookAt(surfaceLookTarget)
+          } else if (surfaceMission && phase === 'surface_operations' && destination) {
+            const driveAngle = record.spacecraftId === 'perseverance'
+              ? Math.min(0.9, Math.max(0, elapsed - STABLE_ORBIT_TIME) * 0.035)
+              : 0
+            surfaceDirection
+              .copy(surfaceNormal)
+              .multiplyScalar(Math.cos(driveAngle))
+              .addScaledVector(surfaceTangent, Math.sin(driveAngle))
+              .normalize()
+            payload.position
+              .copy(destinationTarget)
+              .addScaledVector(surfaceDirection, destination.radius + 4)
+            payload.up.copy(surfaceDirection)
+            surfaceForward
+              .copy(surfaceTangent)
+              .multiplyScalar(Math.cos(driveAngle))
+              .addScaledVector(surfaceNormal, -Math.sin(driveAngle))
+              .normalize()
+            surfaceLookTarget.copy(payload.position).add(surfaceForward)
+            payload.lookAt(surfaceLookTarget)
+            if (record.spacecraftId === 'ingenuity') {
+              ingenuityRotors.current.first ??= payload.getObjectByName('rotors_01') ?? null
+              ingenuityRotors.current.second ??= payload.getObjectByName('rotors_02') ?? null
+              ingenuityRotors.current.first?.rotateY(dt * 36)
+              ingenuityRotors.current.second?.rotateY(-dt * 36)
+            }
+          } else if (missionProfile === 'flyby' && (phase === 'planetary_flyby' || phase === 'mission_complete')) {
             const flybyExit: FlightPoint = {
               x: destination.center.x - destination.radius - 78,
               y: destination.center.y + 8,
@@ -491,7 +556,11 @@ function LaunchWorld({
             )
             payload.position.set(transferPosition.x, transferPosition.y, transferPosition.z)
           }
-          if (phase !== 'stable_orbit') {
+          if (
+            phase !== 'stable_orbit' &&
+            phase !== 'surface_landing' &&
+            phase !== 'surface_operations'
+          ) {
             desiredYaw = Math.atan2(
               destination.center.x - payload.position.x,
               destination.center.z - payload.position.z,
@@ -585,12 +654,14 @@ function LaunchWorld({
       let rate = 2.4
       let fov = 30
       const inTransfer = phase === 'tli_burn' || phase === 'departure' || phase === 'transfer'
+      const inSurfaceMission = surfaceMission &&
+        (phase === 'surface_landing' || phase === 'surface_operations')
       const inApproach =
         phase === 'approach' || phase === 'orbital_insertion' ||
         phase === 'planetary_flyby' || phase === 'mission_complete'
       const inOrbit = phase === 'stable_orbit'
 
-      if (destination && flightMode && (inTransfer || inApproach || inOrbit)) {
+      if (destination && flightMode && (inTransfer || inApproach || inOrbit || inSurfaceMission)) {
         toDestination.set(
           destination.center.x - payload.position.x,
           destination.center.y - payload.position.y,
@@ -603,7 +674,16 @@ function LaunchWorld({
         side.normalize()
         upAxis.crossVectors(side, forward).normalize()
 
-        if (inOrbit) {
+        if (inSurfaceMission) {
+          desiredRelative
+            .copy(surfaceNormal)
+            .multiplyScalar(48)
+            .addScaledVector(surfaceTangent, 16)
+            .addScaledVector(worldUp, 8)
+          desiredLook.set(0, 0, 0)
+          fov = 42
+          rate = 3
+        } else if (inOrbit) {
           if (orbitCameraView === 'planet') {
             desiredRelative.set(
               destinationTarget.x + cameraOrbitRadius * 2 - payload.position.x,
@@ -729,7 +809,7 @@ function LaunchWorld({
     destination &&
       !launchFailed &&
       !missionFailed &&
-      ['transfer', 'approach', 'orbital_insertion', 'stable_orbit', 'planetary_flyby', 'mission_complete'].includes(phase),
+    ['transfer', 'approach', 'orbital_insertion', 'stable_orbit', 'surface_landing', 'surface_operations', 'planetary_flyby', 'mission_complete'].includes(phase),
   )
   const rocketModel = record.launchVehicle.model
 
@@ -754,8 +834,12 @@ function LaunchWorld({
         shadow-camera-top={200}
         shadow-camera-bottom={-120}
       />
-      <SkyBackdrop spaceMix={spaceMix} />
-      <CloudLayer spaceMix={spaceMix} />
+      <group ref={skyBackdropGroup}>
+        <SkyBackdrop spaceMix={spaceMix} />
+      </group>
+      <group ref={cloudLayerGroup}>
+        <CloudLayer spaceMix={spaceMix} />
+      </group>
       <group ref={groundGroup}>
         <LaunchSite startedAt={startedAt} />
       </group>
@@ -768,6 +852,7 @@ function LaunchWorld({
 
       {destination && planetStyle && destinationTextures && (
         <group
+          ref={destinationPlanetGroup}
           position={[destination.center.x, destination.center.y, destination.center.z]}
           visible={destinationVisible}
           scale={phase === 'stable_orbit' ? STABLE_ORBIT_PLANET_SCALE : 1}
@@ -816,18 +901,40 @@ function LaunchWorld({
         />
       </group>
 
+      {surfaceMission && destination && (
+        <MarsLandingScene
+          spacecraftId={record.spacecraftId ?? ''}
+          destinationCenter={destinationTarget}
+          destinationRadius={destination.radius}
+          startedAt={startedAt}
+          phase={phase}
+          payloadRef={deployedPayload}
+          modelRef={payloadModel}
+          extrasRef={payloadExtras}
+          planetRef={destinationPlanetGroup}
+          skyRef={skyBackdropGroup}
+          cloudsRef={cloudLayerGroup}
+          earthRef={earthGroup}
+          groundRef={groundGroup}
+        />
+      )}
+
       <group ref={deployedPayload} visible={false}>
-        <Suspense fallback={null}>
-          <SpacecraftPayloadModel model={record.spacecraftModel} onReady={markPayloadReady} />
-        </Suspense>
-        <mesh position={[0, 0, 4.8]}>
-          <sphereGeometry args={[0.34, 12, 10]} />
-          <meshBasicMaterial color="#55e7ff" toneMapped={false} />
-        </mesh>
-        <pointLight position={[0, 1, 0]} color="#55e7ff" intensity={5} distance={24} />
-        <sprite ref={thrustGlow} position={[0, 0, -5]} scale={[7, 7, 1]} visible={false}>
-          <spriteMaterial map={glowMap} color="#7fdcff" blending={AdditiveBlending} transparent depthWrite={false} opacity={0.8} fog={false} />
-        </sprite>
+        <group ref={payloadModel}>
+          <Suspense fallback={null}>
+            <SpacecraftPayloadModel model={record.spacecraftModel} onReady={markPayloadReady} />
+          </Suspense>
+        </group>
+        <group ref={payloadExtras}>
+          <mesh position={[0, 0, 4.8]}>
+            <sphereGeometry args={[0.34, 12, 10]} />
+            <meshBasicMaterial color="#55e7ff" toneMapped={false} />
+          </mesh>
+          <pointLight position={[0, 1, 0]} color="#55e7ff" intensity={5} distance={24} />
+          <sprite ref={thrustGlow} position={[0, 0, -5]} scale={[7, 7, 1]} visible={false}>
+            <spriteMaterial map={glowMap} color="#7fdcff" blending={AdditiveBlending} transparent depthWrite={false} opacity={0.8} fog={false} />
+          </sprite>
+        </group>
       </group>
       <primitive object={ionTrail.group} />
       <SpaceDust payloadRef={deployedPayload} spaceMix={spaceMix} />
@@ -1091,13 +1198,15 @@ function phaseLabel(
     approach: 'DESTINATION APPROACH',
     orbital_insertion: 'ORBITAL INSERTION',
     stable_orbit: 'STABLE ORBIT',
+    surface_landing: 'MARS SURFACE LANDING',
+    surface_operations: 'MARS SURFACE OPERATIONS',
     planetary_flyby: 'PLANETARY FLYBY',
     mission_complete: 'FLYBY COMPLETE',
     configuration_error: 'DESTINATION CONFIGURATION ERROR',
     anomaly: launchFailed ? 'LAUNCH ABORTED' : missionFailed ? 'SPACECRAFT ANOMALY' : 'ASCENT ANOMALY',
     complete: launchFailed ? 'LAUNCH FAILED' : missionFailed ? 'MISSION FAILED IN FLIGHT' : 'SPACECRAFT DEPLOYED',
   }
-  if (!destinationConfigured && ['departure', 'transfer', 'approach', 'orbital_insertion', 'stable_orbit', 'planetary_flyby', 'mission_complete'].includes(phase)) {
+  if (!destinationConfigured && ['departure', 'transfer', 'approach', 'orbital_insertion', 'stable_orbit', 'surface_landing', 'surface_operations', 'planetary_flyby', 'mission_complete'].includes(phase)) {
     return 'DESTINATION CONFIGURATION ERROR'
   }
   if (phase === 'stable_orbit' && missionProfile !== 'orbiter') return 'MISSION PROFILE ERROR'
@@ -1130,6 +1239,7 @@ export function LaunchSequence({ record, onComplete }: { record: LaunchRecord; o
     ),
     [record.destination, record.planningSnapshot.destinationBodyId, record.planningSnapshot.destinationId],
   )
+  const surfaceMission = isMarsSurfaceMission(record.spacecraftId, destination?.id)
   const missionProfile: MissionFlightProfile = record.planningSnapshot.missionProfile ??
     (record.destination.toLocaleLowerCase().includes('asteroid') ? 'planning' : 'orbiter')
   const onAssetReady = useCallback(() => {
@@ -1153,14 +1263,16 @@ export function LaunchSequence({ record, onComplete }: { record: LaunchRecord; o
         missionFailed,
         missionProfile,
         destination !== null,
+        isMarsSurfaceMission(record.spacecraftId, destination?.id),
       )
       if (nextPhase === 'stable_orbit' && !initializedOrbitView.current) {
         initializedOrbitView.current = true
         setOrbitCameraView('satellite')
       }
       setPhase((currentPhase) => {
-        const currentAt = sequenceElapsedAt(currentPhase, failed, missionFailed, missionProfile, destination !== null)
-        const nextAt = sequenceElapsedAt(nextPhase, failed, missionFailed, missionProfile, destination !== null)
+        const surfaceMission = isMarsSurfaceMission(record.spacecraftId, destination?.id)
+        const currentAt = sequenceElapsedAt(currentPhase, failed, missionFailed, missionProfile, destination !== null, surfaceMission)
+        const nextAt = sequenceElapsedAt(nextPhase, failed, missionFailed, missionProfile, destination !== null, surfaceMission)
         return nextAt < currentAt ? currentPhase : nextPhase
       })
       if (isTerminalSequencePhase(nextPhase)) {
@@ -1172,7 +1284,7 @@ export function LaunchSequence({ record, onComplete }: { record: LaunchRecord; o
       }
     }, 80)
     return () => window.clearInterval(interval)
-  }, [destination, failed, missionFailed, missionProfile, startedAt])
+  }, [destination, failed, missionFailed, missionProfile, record.spacecraftId, startedAt])
 
   const sequenceLabel = phaseLabel(phase, failed, missionFailed, missionProfile, destination !== null)
   const hasTerminalPhase = isTerminalSequencePhase(phase)
@@ -1182,6 +1294,8 @@ export function LaunchSequence({ record, onComplete }: { record: LaunchRecord; o
       ? failed ? 'LAUNCH FAILED' : 'MISSION FAILED IN FLIGHT'
       : phase === 'stable_orbit'
         ? 'STABLE ORBIT · MISSION OPERATIONS'
+        : phase === 'surface_operations'
+          ? 'MARS SURFACE OPERATIONS'
         : phase === 'mission_complete'
           ? 'PLANETARY FLYBY COMPLETE'
           : phase === 'configuration_error'
@@ -1197,7 +1311,7 @@ export function LaunchSequence({ record, onComplete }: { record: LaunchRecord; o
       aria-label={`${record.launchVehicle.name} real-time 3D launch sequence: ${sequenceLabel}`}
     >
       <Canvas
-        frameloop={hasTerminalPhase && !isOrbitalPhase ? 'demand' : 'always'}
+        frameloop={hasTerminalPhase && !isOrbitalPhase && phase !== 'surface_operations' ? 'demand' : 'always'}
         camera={{ position: [112, 84, 175], fov: 38, near: 1, far: 60000 }}
         dpr={[1, 1.75]}
         gl={{ antialias: true, powerPreference: 'high-performance', alpha: false }}
@@ -1222,7 +1336,11 @@ export function LaunchSequence({ record, onComplete }: { record: LaunchRecord; o
           </p>
         )}
         <p
-          className={`mt-2 text-3xl font-black tracking-[0.18em] drop-shadow-[0_3px_12px_rgba(0,0,0,0.75)] sm:text-4xl ${
+          className={`mt-2 font-black drop-shadow-[0_3px_12px_rgba(0,0,0,0.75)] ${
+            phase === 'surface_landing' || phase === 'surface_operations'
+              ? 'text-xl tracking-[0.12em] sm:text-2xl'
+              : 'text-3xl tracking-[0.18em] sm:text-4xl'
+          } ${
             phase === 'anomaly' || phase === 'configuration_error'
               ? (failed ? 'text-rose-100' : 'text-amber-100')
               : phase === 'ignition'
@@ -1259,6 +1377,8 @@ export function LaunchSequence({ record, onComplete }: { record: LaunchRecord; o
                 ? 'Mission flight unavailable'
                 : phase === 'stable_orbit'
                   ? `Stable orbit around ${destination?.name ?? 'destination'} · mission assessment pending`
+                  : phase === 'surface_operations'
+                    ? 'Landed on Mars · surface mission active'
                   : phase === 'mission_complete'
                     ? `Flyby of ${destination?.name ?? record.destination} complete`
                     : 'Deployment complete · mission assessment pending'
@@ -1324,7 +1444,9 @@ export function LaunchSequence({ record, onComplete }: { record: LaunchRecord; o
           {phase === 'leo_coast' && 'The upper stage has reached low Earth orbit. Flight controllers check spacecraft systems before committing to the translunar injection burn.'}
           {phase === 'spacecraft_deployment' && (
             isSurfacePayload(record)
-              ? 'Selected surface vehicle separates in low Earth orbit; entry, descent, and landing are not simulated.'
+              ? surfaceMission
+                ? 'Surface vehicle separates in low Earth orbit; the simplified flight continues to Mars and a simulated landing.'
+                : 'Selected surface vehicle separates in low Earth orbit; entry, descent, and landing are not simulated.'
               : 'Spacecraft separates in low Earth orbit, well clear of Earth’s surface, and begins independent simulated motion.'
           )}
           {phase === 'spacecraft_initialization' && (
@@ -1334,7 +1456,9 @@ export function LaunchSequence({ record, onComplete }: { record: LaunchRecord; o
           )}
           {phase === 'mission_active' && (
             isSurfacePayload(record)
-              ? 'Surface mission destination selected · landing and surface operations are not simulated.'
+              ? surfaceMission
+                ? 'Mars-bound surface mission is underway; planetary approach and landing are shown in the simplified flight.'
+                : 'Surface mission destination selected · landing and surface operations are not simulated.'
               : record.destination.toLowerCase().includes('earth')
                 ? 'Initial Earth-orbit segment simulated · mission objectives still require assessment.'
                 : `Simplified outbound trajectory toward ${record.destination} · no detailed transfer is simulated.`
@@ -1345,6 +1469,12 @@ export function LaunchSequence({ record, onComplete }: { record: LaunchRecord; o
           {phase === 'approach' && `Destination approach: ${destination?.name ?? record.destination} is in view.`}
           {phase === 'orbital_insertion' && `Performing a simplified orbital insertion around ${destination?.name ?? record.destination}.`}
           {phase === 'stable_orbit' && `Spacecraft position is moving continuously around ${destination?.name ?? record.destination}; mission objectives are assessed separately.`}
+          {phase === 'surface_landing' && `${record.spacecraftName} is descending toward the Martian surface.`}
+          {phase === 'surface_operations' && (
+            record.spacecraftId === 'perseverance'
+              ? 'Perseverance has landed on Mars and is driving across the surface.'
+              : 'Ingenuity has landed on Mars and is beginning surface operations.'
+          )}
           {phase === 'planetary_flyby' && `Spacecraft is passing ${record.destination} on a flyby trajectory; no orbit insertion is performed.`}
           {phase === 'mission_complete' && `The spacecraft completed its simulated flyby of ${record.destination}.`}
           {phase === 'configuration_error' && (

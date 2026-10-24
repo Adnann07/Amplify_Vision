@@ -7,6 +7,7 @@ import {
   FAIRING_SEPARATION_TIME,
   LAUNCH_FAILURE_COMPLETE_TIME,
   LAUNCH_FAILURE_TIME,
+  MARS_SURFACE_OPERATIONS_TIME,
   MISSION_ACTIVE_TIME,
   MISSION_COMPLETE_TIME,
   MISSION_FAILURE_COMPLETE_TIME,
@@ -20,8 +21,11 @@ import {
   TLI_BURN_TIME,
   TRANSFER_START_TIME,
   ORBITAL_SPACE_MIX,
+  isMarsSurfaceMission,
+  isTerminalSequencePhase,
   isStageSeparationReady,
   isSpacecraftDeploymentReady,
+  sequenceElapsedAt,
   sequencePhaseAt,
 } from './launchSequenceState'
 
@@ -75,6 +79,18 @@ describe('launch and mission flight state machine', () => {
     expect(sequencePhaseAt(ARRIVAL_TIME, false, false, 'flyby')).toBe('approach')
     expect(sequencePhaseAt(ORBITAL_INSERTION_TIME, false, false, 'flyby')).toBe('planetary_flyby')
     expect(sequencePhaseAt(MISSION_COMPLETE_TIME, false, false, 'flyby')).toBe('mission_complete')
+  })
+
+  it('lands Perseverance and Ingenuity on Mars instead of inserting them into orbit', () => {
+    expect(isMarsSurfaceMission('perseverance', 'mars')).toBe(true)
+    expect(isMarsSurfaceMission('ingenuity', 'mars')).toBe(true)
+    expect(isMarsSurfaceMission('perseverance', 'jupiter')).toBe(false)
+    expect(isMarsSurfaceMission('juno', 'mars')).toBe(false)
+    expect(sequencePhaseAt(ARRIVAL_TIME, false, false, 'orbiter', true, true)).toBe('approach')
+    expect(sequencePhaseAt(ORBITAL_INSERTION_TIME, false, false, 'orbiter', true, true)).toBe('surface_landing')
+    expect(sequencePhaseAt(MARS_SURFACE_OPERATIONS_TIME, false, false, 'orbiter', true, true)).toBe('surface_operations')
+    expect(sequenceElapsedAt('surface_operations', false, false, 'orbiter', true, true)).toBe(MARS_SURFACE_OPERATIONS_TIME)
+    expect(isTerminalSequencePhase('surface_operations')).toBe(true)
   })
 
   it('reports a configuration error instead of pretending to reach an unsupported target', () => {

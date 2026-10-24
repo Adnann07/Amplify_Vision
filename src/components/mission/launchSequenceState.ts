@@ -17,6 +17,8 @@ export type SequencePhase =
   | 'approach'
   | 'orbital_insertion'
   | 'stable_orbit'
+  | 'surface_landing'
+  | 'surface_operations'
   | 'planetary_flyby'
   | 'mission_complete'
   | 'configuration_error'
@@ -37,6 +39,7 @@ export const TRANSFER_START_TIME = 37
 export const ARRIVAL_TIME = 45
 export const ORBITAL_INSERTION_TIME = 49
 export const STABLE_ORBIT_TIME = 55
+export const MARS_SURFACE_OPERATIONS_TIME = 70
 export const MISSION_COMPLETE_TIME = 51
 export const CONFIGURATION_ERROR_TIME = 32
 export const LAUNCH_FAILURE_TIME = 6.35
@@ -99,6 +102,16 @@ const FLYBY_MISSION_PHASES: { at: number; phase: SequencePhase }[] = [
   { at: MISSION_COMPLETE_TIME, phase: 'mission_complete' },
 ]
 
+const MARS_SURFACE_MISSION_PHASES: { at: number; phase: SequencePhase }[] = [
+  ...ASCENT_PHASES,
+  { at: TLI_BURN_TIME, phase: 'tli_burn' },
+  { at: DEPARTURE_TIME, phase: 'departure' },
+  { at: TRANSFER_START_TIME, phase: 'transfer' },
+  { at: ARRIVAL_TIME, phase: 'approach' },
+  { at: ORBITAL_INSERTION_TIME, phase: 'surface_landing' },
+  { at: MARS_SURFACE_OPERATIONS_TIME, phase: 'surface_operations' },
+]
+
 const CONFIGURATION_ERROR_PHASES: { at: number; phase: SequencePhase }[] = [
   ...ASCENT_PHASES,
   { at: CONFIGURATION_ERROR_TIME, phase: 'configuration_error' },
@@ -109,11 +122,18 @@ function phasesFor(
   missionFailed: boolean,
   missionProfile: 'orbiter' | 'flyby' | 'planning',
   destinationConfigured: boolean,
+  surfaceMission: boolean,
 ) {
   if (launchFailed) return FAILURE_PHASES
   if (missionFailed) return MISSION_FAILURE_PHASES
   if (!destinationConfigured || missionProfile === 'planning') return CONFIGURATION_ERROR_PHASES
+  if (surfaceMission) return MARS_SURFACE_MISSION_PHASES
   return missionProfile === 'flyby' ? FLYBY_MISSION_PHASES : ORBITAL_MISSION_PHASES
+}
+
+export function isMarsSurfaceMission(spacecraftId?: string, destinationId?: string) {
+  return destinationId === 'mars' &&
+    (spacecraftId === 'perseverance' || spacecraftId === 'ingenuity')
 }
 
 export function sequencePhaseAt(
@@ -122,8 +142,9 @@ export function sequencePhaseAt(
   missionFailed = false,
   missionProfile: 'orbiter' | 'flyby' | 'planning' = 'orbiter',
   destinationConfigured = true,
+  surfaceMission = false,
 ): SequencePhase {
-  const phases = phasesFor(launchFailed, missionFailed, missionProfile, destinationConfigured)
+  const phases = phasesFor(launchFailed, missionFailed, missionProfile, destinationConfigured, surfaceMission)
   let phase: SequencePhase = 'loading'
   for (const entry of phases) {
     if (elapsed < entry.at) break
@@ -138,13 +159,15 @@ export function sequenceElapsedAt(
   missionFailed = false,
   missionProfile: 'orbiter' | 'flyby' | 'planning' = 'orbiter',
   destinationConfigured = true,
+  surfaceMission = false,
 ): number {
-  const phases = phasesFor(launchFailed, missionFailed, missionProfile, destinationConfigured)
+  const phases = phasesFor(launchFailed, missionFailed, missionProfile, destinationConfigured, surfaceMission)
   return phases.find((entry) => entry.phase === phase)?.at ?? 0
 }
 
 export function isTerminalSequencePhase(phase: SequencePhase) {
   return phase === 'stable_orbit' ||
+    phase === 'surface_operations' ||
     phase === 'mission_complete' ||
     phase === 'configuration_error' ||
     phase === 'complete'
