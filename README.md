@@ -368,32 +368,6 @@ flowchart LR
     Chat --> Groq["Groq API · server key"]
 ```
 
-### Juno ephemeris and playback data flow
-
-```mermaid
-sequenceDiagram
-    actor Player
-    participant UI as Juno simulation UI
-    participant API as Same-origin API
-    participant H as NASA/JPL Horizons
-    participant Scene as Three.js orbital scene
-    Player->>UI: Open Juno simulation
-    UI->>API: Request UTC interval (up to 56 days)
-    API->>H: Target -61 relative to Jupiter center 599; 3-hour vectors
-    H-->>API: KM-S geometric vector table
-    API-->>UI: Validated Horizons response
-    UI->>UI: Validate target, center, units, interval, and sample order
-    UI->>Scene: Supply ephemeris samples and playback controls
-    loop Animation frames
-      Scene->>Scene: Interpolate sample position at simulation time
-      Scene-->>UI: Jupiter-relative XYZ and distance in km
-    end
-    UI->>API: Extend coverage before current interval ends
-    alt Horizons unavailable
-      UI->>UI: Use explicitly labeled approximate Kepler model
-    end
-```
-
 ### Mission design to campaign result
 
 ```mermaid
