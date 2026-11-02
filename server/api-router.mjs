@@ -3,6 +3,7 @@ import { createMissionControlHandler } from './mission-control.mjs'
 import { createObservationImageryHandler } from './observation-imagery.mjs'
 import { createRealTimeEventsHandler, createRealTimeEventsService } from './real-time-events.mjs'
 import { createJunoTrajectoryHandler } from './juno-trajectory.mjs'
+import { createTeamMissionHandler } from './team-missions.mjs'
 
 const allowedTargets = new Set(['199', '299', '399', '499', '599', '699', '799', '899'])
 const spaceWeatherService = createSpaceWeatherService()
@@ -15,6 +16,7 @@ const realTimeEventsHandler = createRealTimeEventsHandler({
   service: createRealTimeEventsService({ spaceWeatherService }),
 })
 const junoTrajectoryHandler = createJunoTrajectoryHandler()
+const teamMissionHandler = createTeamMissionHandler()
 
 export async function proxyHorizons(request, response, url) {
   if (request.method !== 'GET') {
@@ -95,6 +97,10 @@ export function sendJson(response, status, body) {
 
 export async function handleApiRequest(request, response) {
   const url = new URL(request.url ?? '/', 'http://localhost')
+  if (url.pathname.startsWith('/api/team-missions')) {
+    await teamMissionHandler(request, response)
+    return true
+  }
   if (url.pathname === '/api/mission-control/chat') {
     await missionControlHandler(request, response)
     return true
@@ -121,4 +127,3 @@ export async function handleApiRequest(request, response) {
   }
   return false
 }
-

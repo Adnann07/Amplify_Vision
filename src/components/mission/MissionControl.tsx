@@ -14,6 +14,7 @@ import {
   type MissionControlSession,
   type MissionEventSeverity,
 } from '../../data/missionControlSimulation'
+import { teamMissionRoles, type TeamMissionRole, type TeamMissionRoom } from '../../data/teamMissions'
 
 const SpacecraftViewer = lazy(() =>
   import('../3d/SpacecraftViewer').then((module) => ({ default: module.SpacecraftViewer })),
@@ -34,6 +35,9 @@ interface MissionControlProps {
   onReturnToOverview: () => void
   onRunMissionAssessment: () => void
   persistenceWarning: string | null
+  teamRoom: TeamMissionRoom | null
+  teamParticipantId: string | null
+  onCreateTeam: (name: string, role: TeamMissionRole) => Promise<void>
 }
 
 const tabs: MissionControlTab[] = [
@@ -376,12 +380,103 @@ function EventList({ events }: { events: MissionControlSession['state']['events'
   )
 }
 
+function TeamMissionPanel({
+  room,
+  participantId,
+  onCreateTeam,
+}: {
+  room: TeamMissionRoom | null
+  participantId: string | null
+  onCreateTeam: (name: string, role: TeamMissionRole) => Promise<void>
+}) {
+  const [name, setName] = useState('')
+  const [role, setRole] = useState<TeamMissionRole>('Mission lead')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const createTeam = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await onCreateTeam(name, role)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not create a team mission.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Panel title="Team mission" eyebrow="Shared Mission Mode · up to four participants">
+      {room ? (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-slate-300">Share this code so teammates can join this active mission.</p>
+            <output aria-label="Team mission code" className="border border-cyan-300/30 bg-cyan-300/[0.06] px-3 py-2 font-mono text-lg font-bold tracking-[0.2em] text-cyan-100">
+              {room.code}
+            </output>
+          </div>
+          <ul className="grid gap-2 sm:grid-cols-2">
+            {room.participants.map((participant) => (
+              <li key={participant.id} className="flex items-center justify-between gap-3 border border-slate-700/70 bg-slate-950/40 px-3 py-2 text-xs">
+                <span className="truncate text-slate-100">{participant.name}{participant.id === participantId ? ' (you)' : ''}</span>
+                <span className="shrink-0 text-cyan-200">{participant.role}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-[10px] leading-relaxed text-slate-500">
+            Mission commands and simulation updates are shared with the team. Use your role to coordinate decisions together.
+          </p>
+        </div>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+          <label className="text-[9px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+            Your name
+            <input
+              value={name}
+              onChange={(event) => setName(event.target.value.slice(0, 24))}
+              maxLength={24}
+              placeholder="Mission lead"
+              className="mt-1 block w-full border border-slate-700 bg-[#050c14] px-3 py-2 text-xs normal-case tracking-normal text-slate-100"
+            />
+          </label>
+          <label className="text-[9px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+            Your role
+            <select
+              value={role}
+              onChange={(event) => setRole(event.target.value as TeamMissionRole)}
+              className="mt-1 block w-full border border-slate-700 bg-[#050c14] px-3 py-2 text-xs normal-case tracking-normal text-slate-100"
+            >
+              {teamMissionRoles.map((option) => <option key={option}>{option}</option>)}
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={() => void createTeam()}
+            disabled={busy || !name.trim()}
+            className="border border-cyan-300/30 bg-cyan-300/[0.06] px-4 py-2.5 text-[9px] font-bold uppercase tracking-[0.12em] text-cyan-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {busy ? 'Creating…' : 'Create team code'}
+          </button>
+          <p className="text-[10px] text-slate-500 sm:col-span-3">
+            Create a code for this mission, then teammates can enter it from the home screen.
+          </p>
+          {error && <p className="text-xs text-rose-200 sm:col-span-3" role="alert">{error}</p>}
+        </div>
+      )}
+    </Panel>
+  )
+}
+
 export function MissionControl({
   initialSession,
   onSessionChange,
   onReturnToOverview,
   onRunMissionAssessment,
   persistenceWarning,
+  teamRoom,
+  teamParticipantId,
+  onCreateTeam,
 }: MissionControlProps) {
   const session = initialSession
   const [activeTab, setActiveTab] = useState<MissionControlTab>('Overview')
@@ -803,6 +898,13 @@ export function MissionControl({
             <p className="border border-amber-300/30 bg-amber-300/[0.06] p-3 text-xs text-amber-100" role="status">
               {persistenceWarning}
             </p>
+          )}
+          {record.mode === 'mission' && (
+            <TeamMissionPanel
+              room={teamRoom}
+              participantId={teamParticipantId}
+              onCreateTeam={onCreateTeam}
+            />
           )}
           {state.events[0]?.severity !== 'info' && (
             <div className={`flex flex-col justify-between gap-2 border px-4 py-3 sm:flex-row sm:items-center ${severityStyles[state.events[0].severity]}`} role="status">

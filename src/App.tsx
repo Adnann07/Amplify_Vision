@@ -64,6 +64,14 @@ import {
   saveMissionControlSession,
   type MissionControlSession,
 } from './data/missionControlSimulation'
+import {
+  createTeamMission,
+  getTeamMission,
+  joinTeamMission,
+  updateTeamMission,
+  type TeamMissionRole,
+  type TeamMissionRoom,
+} from './data/teamMissions'
 
 type GameMode = 'mission' | 'freeplay'
 type EntryScreen =
@@ -285,6 +293,12 @@ function App() {
   const [missionControlWarning, setMissionControlWarning] =
     useState<string | null>(missionControlRestore.warning)
   const missionControlSessionRef = useRef(missionControlRestore.session)
+  const [teamRoom, setTeamRoom] = useState<TeamMissionRoom | null>(null)
+  const [teamParticipantId, setTeamParticipantId] = useState<string | null>(null)
+  const [pendingTeamSession, setPendingTeamSession] = useState<MissionControlSession | null>(null)
+  const teamRoomRef = useRef<TeamMissionRoom | null>(null)
+  const teamIdentityRef = useRef<{ code: string; participantId: string } | null>(null)
+  const pendingTeamSessionRef = useRef<MissionControlSession | null>(null)
   const [showCinematicLanding, setShowCinematicLanding] = useState(
     () => !window.location.hash && !missionControlRestore.session,
   )
@@ -351,10 +365,113 @@ function App() {
   const [experimentPanelSlot, setExperimentPanelSlot] = useState<HTMLDivElement | null>(null)
 
   const campaignProgress = campaignState.progress
+  const joinActiveTeamMission = async (code: string, name: string, role: TeamMissionRole) => {
+    const membership = await joinTeamMission(code, name, role)
+    const identity = { code: membership.room.code, participantId: membership.participantId }
+    teamIdentityRef.current = identity
+    teamRoomRef.current = membership.room
+    setTeamParticipantId(identity.participantId)
+    setTeamRoom(membership.room)
+    pendingTeamSessionRef.current = null
+    setPendingTeamSession(null)
+    missionControlSessionRef.current = membership.room.session
+    setMissionControlSession(membership.room.session)
+    setMissionControlWarning(saveMissionControlSession(membership.room.session))
+    setGameMode('mission')
+    setShowCinematicLanding(false)
+    setLaunchScreen('mission-control')
+  }
+  const createMissionTeam = async (name: string, role: TeamMissionRole) => {
+    const session = missionControlSessionRef.current
+    if (!session || session.record.mode !== 'mission') {
+      throw new Error('Teams are available for active Mission Mode sessions.')
+    }
+    const membership = await createTeamMission(session, name, role)
+    const identity = { code: membership.room.code, participantId: membership.participantId }
+    teamIdentityRef.current = identity
+    teamRoomRef.current = membership.room
+    setTeamParticipantId(identity.participantId)
+    setTeamRoom(membership.room)
+    pendingTeamSessionRef.current = null
+    setPendingTeamSession(null)
+  }
+  const activeTeamCode = teamRoom?.code
+
+  useEffect(() => {
+    if (!teamIdentityRef.current) return
+    const identity = teamIdentityRef.current
+    let active = true
+    let requestInFlight = false
+    const synchronizeRoom = async () => {
+      if (requestInFlight) return
+      requestInFlight = true
+      try {
+        const latestRoom = await getTeamMission(identity.code, identity.participantId)
+        if (!active) return
+        const knownRoom = teamRoomRef.current
+        if (knownRoom && latestRoom.revision <= knownRoom.revision) return
+        teamRoomRef.current = latestRoom
+        setTeamRoom(latestRoom)
+        if (!pendingTeamSessionRef.current) {
+          missionControlSessionRef.current = latestRoom.session
+          setMissionControlSession(latestRoom.session)
+          setMissionControlWarning(saveMissionControlSession(latestRoom.session))
+        }
+      } catch (error) {
+        if (active) {
+          setMissionControlWarning(
+            error instanceof Error ? error.message : 'Team mission updates could not be loaded.',
+          )
+        }
+      } finally {
+        requestInFlight = false
+      }
+    }
+    void synchronizeRoom()
+    const intervalId = window.setInterval(() => void synchronizeRoom(), 1500)
+    return () => {
+      active = false
+      window.clearInterval(intervalId)
+    }
+  }, [activeTeamCode])
+
+  useEffect(() => {
+    if (!activeTeamCode || !teamParticipantId || !pendingTeamSession) return
+    let active = true
+    const timeoutId = window.setTimeout(() => {
+      void updateTeamMission(activeTeamCode, teamParticipantId, pendingTeamSession)
+        .then((updatedRoom) => {
+          if (!active) return
+          if (!teamRoomRef.current || updatedRoom.revision >= teamRoomRef.current.revision) {
+            teamRoomRef.current = updatedRoom
+            setTeamRoom(updatedRoom)
+          }
+          if (pendingTeamSessionRef.current === pendingTeamSession) {
+            pendingTeamSessionRef.current = null
+            setPendingTeamSession(null)
+          }
+        })
+        .catch((error: unknown) => {
+          if (active) {
+            setMissionControlWarning(
+              error instanceof Error ? error.message : 'Mission updates could not be shared with the team.',
+            )
+          }
+        })
+    }, 250)
+    return () => {
+      active = false
+      window.clearTimeout(timeoutId)
+    }
+  }, [activeTeamCode, pendingTeamSession, teamParticipantId])
+
   const updateMissionControlSession = useCallback((session: MissionControlSession) => {
     missionControlSessionRef.current = session
     setMissionControlSession(session)
     setMissionControlWarning(saveMissionControlSession(session))
+    const pending = teamIdentityRef.current ? session : null
+    pendingTeamSessionRef.current = pending
+    setPendingTeamSession(pending)
   }, [])
   const availableCampaignMissions = useMemo(
     () => [...campaignMissions, ...campaignProgress.eventMissions],
@@ -399,7 +516,9 @@ function App() {
   }, [entryScreen, launchScreen])
 
   const missionControlRunning =
-    missionControlSession !== null && !missionControlSession.state.paused
+    missionControlSession !== null &&
+    !missionControlSession.state.paused &&
+    (!teamRoom || teamRoom.hostParticipantId === teamParticipantId)
   useEffect(() => {
     if (!missionControlRunning) return
     const intervalId = window.setInterval(() => {
@@ -643,6 +762,12 @@ function App() {
     missionControlSessionRef.current = null
     setMissionControlSession(null)
     setMissionControlWarning(clearMissionControlSession())
+    teamIdentityRef.current = null
+    teamRoomRef.current = null
+    pendingTeamSessionRef.current = null
+    setTeamRoom(null)
+    setTeamParticipantId(null)
+    setPendingTeamSession(null)
     if (window.location.hash) {
       window.history.replaceState(
         window.history.state,
@@ -948,6 +1073,9 @@ function App() {
             onReturnToOverview={returnToMissionOverview}
             onRunMissionAssessment={runMissionControlAssessment}
             persistenceWarning={missionControlWarning}
+            teamRoom={teamRoom}
+            teamParticipantId={teamParticipantId}
+            onCreateTeam={createMissionTeam}
           />
         </Suspense>
       </>
@@ -1016,6 +1144,7 @@ function App() {
       <>
         <HomeScreen
           onMissionMode={() => setEntryScreen('campaign')}
+          onJoinTeam={joinActiveTeamMission}
           onLiveEvents={() => setEntryScreen('events')}
           onJunoSimulation={() => {
             setShowCinematicLanding(false)

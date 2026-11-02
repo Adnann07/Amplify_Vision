@@ -64,7 +64,7 @@ export function evaluateCampaignAttempt(
   const scoreCategories: CampaignScoreCategory[] = [
     {
       id: 'primary-objective',
-      label: 'Primary mission objective',
+      label: 'Mission success',
       points: objectiveAchieved ? weights.primaryObjective : 0,
       maximum: weights.primaryObjective,
       explanation: objectiveAchieved
@@ -73,12 +73,12 @@ export function evaluateCampaignAttempt(
     },
     {
       id: 'engineering-compliance',
-      label: 'Engineering constraint compliance',
+      label: 'Decision-making · engineering constraints',
       points: record.missionRequirementResults.length
         ? (weights.engineeringCompliance * requirementsPassed) / record.missionRequirementResults.length
         : 0,
       maximum: weights.engineeringCompliance,
-      explanation: `${requirementsPassed} of ${record.missionRequirementResults.length} recorded constraints passed.`,
+      explanation: `${requirementsPassed} of ${record.missionRequirementResults.length} recorded constraints passed. Meeting constraints reflects effective spacecraft design decisions.`,
     },
     {
       id: 'budget-efficiency',
@@ -95,14 +95,14 @@ export function evaluateCampaignAttempt(
     },
     {
       id: 'resource-efficiency',
-      label: 'Resource efficiency',
+      label: 'Efficient use of resources',
       points: (weights.resourceEfficiency * resourceEfficiency) / 100,
       maximum: weights.resourceEfficiency,
       explanation: `Recorded resource efficiency: ${record.missionTelemetry.resourceEfficiency}%.`,
     },
     {
       id: 'science-performance',
-      label: 'Science capability',
+      label: 'Scientific value',
       points: weights.sciencePerformance * scienceProgress,
       maximum: weights.sciencePerformance,
       explanation: `Recorded science capability: ${record.missionTelemetry.science} points; mission target: ${mission.scienceTarget}.`,

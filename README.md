@@ -20,6 +20,7 @@ Amplify Vision brings mission planning, spacecraft configuration, launch visuali
 
 - [A visual tour](#a-visual-tour)
 - [What you can do](#what-you-can-do)
+- [2026 NASA Space Apps Challenge alignment](#2026-nasa-space-apps-challenge-alignment)
 - [NASA, JPL, NOAA, and USGS data integrations](#nasa-jpl-noaa-and-usgs-data-integrations)
 - [Juno around Jupiter: ephemeris and playback](#juno-around-jupiter-ephemeris-and-playback)
 - [NASA 3D models and assets](#nasa-3d-models-and-assets)
@@ -112,7 +113,7 @@ Campaign catalogue:
 26. Landsat 8 Earth Imaging Design
 27. DSCOVR Earth and Space-Weather Design Study
 
-Campaign results are scored separately from animation and operations. A successful-looking launch or Mars landing animation alone does not satisfy a campaign objective or unlock a mission. The standard 100-point score is broken down into primary objective (40), engineering compliance (20), budget efficiency (15), resource efficiency (10), science capability (10), and optional objective (5); mission-specific configured weights and constraints remain authoritative.
+Campaign results are scored separately from animation and operations. A successful-looking launch or Mars landing animation alone does not satisfy a campaign objective or unlock a mission. The standard 100-point score rewards mission success (40), decision-making through engineering constraint compliance (20), budget efficiency (15), efficient use of resources (10), scientific value (10), and optional objectives (5); mission-specific configured weights and constraints remain authoritative.
 
 ### Launch and arrival
 
@@ -318,7 +319,44 @@ Mission Control advances its deterministic state in 15 simulated seconds per rea
 
 ### Campaign scoring
 
-Mission scoring is a deterministic weighted assessment of the recorded launch outcome and engineering configuration. The primary objective requires a successful launch, all required mission constraints, and any mission-specific required instrument. Additional categories reward engineering compliance, budget, resource efficiency, science capability, and optional goals. The report shows the values, score components, mission status, and recommendations. Campaign unlocks depend on objective completion, not solely a score tier or a successful visualization.
+Mission scoring is a deterministic weighted assessment of the recorded launch outcome and engineering configuration. The primary objective requires a successful launch, all required mission constraints, and any mission-specific required instrument. Additional categories reward effective design decisions, budget and resource efficiency, scientific value, and optional goals. The report shows the values, score components, mission status, and recommendations. Campaign unlocks depend on objective completion, not solely a score tier or a successful visualization.
+
+### Team missions
+
+After a successful Mission Mode deployment, create an eight-character team code in Mission Control and share it with up to three other participants. Teammates enter the code from the home screen, choose one of four roles, and join the same live operations session. Mission state and commands synchronize through the app server; the host advances the simulation clock. Team rooms are temporary and expire after four hours of inactivity.
+
+The available roles are Mission lead, Engineer, Scientist, and Communications. Roles help participants divide attention and coordinate decisions; they do not enforce permissions or provide separate role-specific controls. Team mode shares operations after deployment rather than providing simultaneous editing of the spacecraft design, launch plan, or campaign choices. The room service currently keeps rooms in the memory of one running server process, so rooms are not durable and are not shared across separate server instances.
+
+## 2026 NASA Space Apps Challenge alignment
+
+The challenge asks players to experience the connected decisions involved in planning, building, launching, operating, and evaluating a space mission. Amplify Vision addresses those areas through the following existing game systems:
+
+| Challenge area | How Amplify Vision addresses it |
+| --- | --- |
+| Mission goals and scenarios | Mission Mode offers a searchable campaign with 27 missions, distinct science objectives, mission-specific requirements, prerequisites, and difficulty labels. Freeplay provides a less constrained sandbox, and eligible live-event records can become clearly labeled design exercises. |
+| Spacecraft and science payload | Players select from spacecraft presets and compatible power, communications, propulsion, payload, and science-instrument options. Camera, spectrometer, and radar choices contribute different modeled science capability and affect build calculations such as mass, power demand, cost, and fit. |
+| Competing engineering constraints | The builder reports calculated mass, payload fit, power and margin, estimated delta-v, communications, science capability, cost, reliability, resource efficiency, and design warnings. Mission Mode checks a design against mission-specific requirements and shows actionable issues before launch. A failed design test informs rather than blocks experimentation. |
+| Launch planning | Players choose among modeled launch vehicles and see vehicle capacity, payload, and cost before attempting a launch. A deterministic launch sequence presents deployment and destination-arrival visuals, with a Mars entry/descent sequence for supported Perseverance and Ingenuity missions. |
+| Planetary planning and orbital context | The planner displays supported planetary positions using date-specific NASA/JPL Horizons vectors and can show a preliminary Earth-to-planet Hohmann transfer estimate when matching vectors are available. This supports mission-planning context, not a selectable orbit design or a propagated mission trajectory. |
+| Resource management and mission operations | Mission Control exposes modeled battery, generated and consumed power, instrument temperature, storage, science data, communications windows, elapsed time, events, and downlink controls. Players can schedule observations, manage instrument and power-saving states, and queue data for a communications window. |
+| Simulation, feedback, and iteration | Players can test designs, attempt launches, run the operations simulation, review a post-mission report with status, score categories, constraints, and recommendations, then retry or revise a design. Campaign progress and scores persist in browser storage. |
+| Scoring and engineering decisions | The deterministic campaign score rewards mission success, engineering-constraint compliance, budget efficiency, resource efficiency, science capability, and optional objectives. The report explains category points and recommendations so players can see how the recorded design affected the result. |
+| Cooperative play | After deployment, a participant can create a shareable code for an active Mission Mode operations session. Up to four named participants can join, select different team roles, see the shared state, and issue mission commands together; the host advances the shared simulation clock. |
+| Learning and accessibility | Mission briefings provide science context and requirements; builder warnings and score explanations connect choices to outcomes. The responsive interface and reduced-motion support accommodate different browsing preferences, while the simulator labels illustrative models and real-data sources separately. |
+| Visualizations and reference data | Interactive spacecraft models, launch and Mars landing scenes, telemetry displays, mission imagery, planetary maps, and the Juno playback experience provide visual context. Live NASA, JPL, NOAA, and USGS records are identified as provider data rather than simulated spacecraft telemetry. |
+
+### Deliberate scope of the challenge implementation
+
+The challenge describes possible features, not a requirement to model every real mission subsystem. Amplify Vision is an educational game, so its integrated design-to-operations loop uses transparent, simplified rules rather than flight-qualified engineering. In particular:
+
+- Mission objectives and requirements are selected from the campaign; this version does not provide a general-purpose objective/constraint authoring tool.
+- The planetary planner shows positions and a preliminary transfer estimate, but players do not configure a target orbit, calculate a launch window, or run a numerically propagated spacecraft trajectory.
+- Resource values and mission elapsed time are simulated gameplay variables. Mission Control is not an unlimited-lifetime model, flight computer, ground-station network, or live command interface.
+- Campaign scoring evaluates the recorded launch outcome and spacecraft design. It does not award separate points for team coordination or for Mission Control observations and downlinks.
+- Team roles are coordination prompts, not enforced responsibilities. Teammates can collaborate on post-deployment operations, but campaign design and launch are not a synchronized multiplayer workflow.
+- There is no global leaderboard, competitive team ranking, or persistent cross-server team-room storage. Team rooms are temporary and process-local as described above.
+
+These boundaries distinguish implemented features from optional challenge ideas and keep the simulator's educational claims aligned with what the application actually models.
 
 ## Architecture
 
@@ -420,6 +458,7 @@ api/
   index.mjs                       Vercel API entry point
 server/
   api-router.mjs                  API route dispatch and JPL Horizons proxy
+  team-missions.mjs               Temporary code-based shared mission rooms
   juno-trajectory.mjs             Jupiter-relative Juno Horizons requests
   mission-control.mjs             Groq chat + NASA Earthdata MCP integration
   observation-imagery.mjs         NASA / USGS imagery services
@@ -443,6 +482,7 @@ Key implementation files:
 - [Campaign catalogue](./src/data/campaign.ts), [mission constraints](./src/data/missionGoals.ts), [scoring](./src/data/campaignScoring.ts).
 - [JPL Horizons browser client](./src/data/horizonsService.ts), [preliminary Hohmann estimator](./src/data/missionPlanner.ts), [Juno orbit model and Horizons parser](./src/data/junoTrajectory.ts).
 - [Mission Control deterministic state engine](./src/data/missionControlSimulation.ts), [mission operations UI](./src/components/mission/MissionControl.tsx).
+- [Team mission client](./src/data/teamMissions.ts), [team-room API](./server/team-missions.mjs), and [team-room tests](./server/team-missions.test.mjs).
 - [Mars EDL/surface scene](./src/components/mission/MarsLandingScene.tsx), [launch scene](./src/components/mission/LaunchSequence.tsx).
 - [Server API router](./server/api-router.mjs), [Vite development API setup](./vite.config.ts), [Vercel API entry](./api/index.mjs).
 
@@ -463,7 +503,7 @@ Copy-Item .env.example .env
 npm run dev
 ```
 
-Open the local URL printed by Vite. The development server supplies same-origin API handlers for chat, NOAA, events, observations, and Juno; the Horizons request is proxied and transformed by Vite configuration.
+Open the local URL printed by Vite. The development server supplies same-origin API handlers for chat, NOAA, events, observations, Juno, and temporary team mission rooms; the Horizons request is proxied and transformed by Vite configuration.
 
 ### Build and run the Node server
 
@@ -494,7 +534,7 @@ npm run lint
 npm run build
 ```
 
-Tests cover engineering/data utilities, mission state and scoring, campaign progression and persistence, provider response validation, Juno trajectory parsing/fallback, mission operations, observation geometry, and UI behavior. Most automated provider tests use fixtures; live provider availability is not a prerequisite for the test suite.
+Tests cover engineering/data utilities, mission state and scoring, campaign progression and persistence, provider response validation, Juno trajectory parsing/fallback, mission operations, team-room creation/joining and capacity limits, observation geometry, and UI behavior. Most automated provider tests use fixtures; live provider availability is not a prerequisite for the test suite.
 
 ## Data, privacy, attribution, and limitations
 

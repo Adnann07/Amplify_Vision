@@ -8,6 +8,7 @@ import {
   LAUNCH_FAILURE_COMPLETE_TIME,
   LAUNCH_FAILURE_TIME,
   MARS_SURFACE_OPERATIONS_TIME,
+  MARS_ROVER_DEPLOYMENT_PROGRESS,
   MISSION_ACTIVE_TIME,
   MISSION_COMPLETE_TIME,
   MISSION_FAILURE_COMPLETE_TIME,
@@ -22,6 +23,8 @@ import {
   TRANSFER_START_TIME,
   ORBITAL_SPACE_MIX,
   isMarsSurfaceMission,
+  isMarsSurfaceScenePhase,
+  isMarsRoverDeployed,
   isTerminalSequencePhase,
   isStageSeparationReady,
   isSpacecraftDeploymentReady,
@@ -87,10 +90,35 @@ describe('launch and mission flight state machine', () => {
     expect(isMarsSurfaceMission('perseverance', 'jupiter')).toBe(false)
     expect(isMarsSurfaceMission('juno', 'mars')).toBe(false)
     expect(sequencePhaseAt(ARRIVAL_TIME, false, false, 'orbiter', true, true)).toBe('approach')
-    expect(sequencePhaseAt(ORBITAL_INSERTION_TIME, false, false, 'orbiter', true, true)).toBe('surface_landing')
-    expect(sequencePhaseAt(MARS_SURFACE_OPERATIONS_TIME, false, false, 'orbiter', true, true)).toBe('surface_operations')
+    const landingPhase = sequencePhaseAt(ORBITAL_INSERTION_TIME, false, false, 'orbiter', true, true)
+    const operationsPhase = sequencePhaseAt(
+      MARS_SURFACE_OPERATIONS_TIME,
+      false,
+      false,
+      'orbiter',
+      true,
+      true,
+    )
+    expect(landingPhase).toBe('surface_landing')
+    expect(operationsPhase).toBe('surface_operations')
+    expect(isMarsSurfaceScenePhase(landingPhase)).toBe(true)
+    expect(isMarsSurfaceScenePhase(operationsPhase)).toBe(true)
     expect(sequenceElapsedAt('surface_operations', false, false, 'orbiter', true, true)).toBe(MARS_SURFACE_OPERATIONS_TIME)
     expect(isTerminalSequencePhase('surface_operations')).toBe(true)
+  })
+
+  it('hands spacecraft transform ownership to the Mars scene only during landing and surface operations', () => {
+    expect(isMarsSurfaceScenePhase('approach')).toBe(false)
+    expect(isMarsSurfaceScenePhase('surface_landing')).toBe(true)
+    expect(isMarsSurfaceScenePhase('surface_operations')).toBe(true)
+    expect(isMarsSurfaceScenePhase('stable_orbit')).toBe(false)
+  })
+
+  it('keeps the rover enclosed until the final sky-crane lowering phase', () => {
+    expect(isMarsRoverDeployed('approach', 1)).toBe(false)
+    expect(isMarsRoverDeployed('surface_landing', MARS_ROVER_DEPLOYMENT_PROGRESS - 0.01)).toBe(false)
+    expect(isMarsRoverDeployed('surface_landing', MARS_ROVER_DEPLOYMENT_PROGRESS)).toBe(true)
+    expect(isMarsRoverDeployed('surface_operations', 0)).toBe(true)
   })
 
   it('reports a configuration error instead of pretending to reach an unsupported target', () => {

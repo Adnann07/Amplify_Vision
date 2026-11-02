@@ -47,6 +47,7 @@ export const LAUNCH_FAILURE_COMPLETE_TIME = 13
 export const MISSION_FAILURE_TIME = 31
 export const MISSION_FAILURE_COMPLETE_TIME = 35
 export const ORBITAL_SPACE_MIX = 0.995
+export const MARS_ROVER_DEPLOYMENT_PROGRESS = 0.88
 
 export function isStageSeparationReady(elapsed: number, spaceMix: number) {
   return elapsed >= STAGE_SEPARATION_TIME && spaceMix >= ORBITAL_SPACE_MIX
@@ -134,6 +135,15 @@ function phasesFor(
 export function isMarsSurfaceMission(spacecraftId?: string, destinationId?: string) {
   return destinationId === 'mars' &&
     (spacecraftId === 'perseverance' || spacecraftId === 'ingenuity')
+}
+
+export function isMarsSurfaceScenePhase(phase: SequencePhase) {
+  return phase === 'surface_landing' || phase === 'surface_operations'
+}
+
+export function isMarsRoverDeployed(phase: SequencePhase, landingProgress: number) {
+  return phase === 'surface_operations' ||
+    (phase === 'surface_landing' && landingProgress >= MARS_ROVER_DEPLOYMENT_PROGRESS)
 }
 
 export function sequencePhaseAt(

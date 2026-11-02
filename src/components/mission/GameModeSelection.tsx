@@ -8,12 +8,14 @@ import {
   type MissionCategory,
 } from '../../data/campaign'
 import { isCampaignUnlockCode, type CampaignProgress } from '../../data/campaignProgress'
+import { teamMissionRoles, type TeamMissionRole } from '../../data/teamMissions'
 
 interface HomeScreenProps {
   onMissionMode: () => void
   onFreeplayMode: () => void
   onLiveEvents: () => void
   onJunoSimulation: () => void
+  onJoinTeam: (code: string, name: string, role: TeamMissionRole) => Promise<void>
 }
 
 export function HomeScreen({
@@ -21,7 +23,27 @@ export function HomeScreen({
   onFreeplayMode,
   onLiveEvents,
   onJunoSimulation,
+  onJoinTeam,
 }: HomeScreenProps) {
+  const [teamCode, setTeamCode] = useState('')
+  const [teamName, setTeamName] = useState('')
+  const [teamRole, setTeamRole] = useState<TeamMissionRole>('Scientist')
+  const [teamMessage, setTeamMessage] = useState<string | null>(null)
+  const [joiningTeam, setJoiningTeam] = useState(false)
+
+  const submitTeamCode = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setJoiningTeam(true)
+    setTeamMessage(null)
+    try {
+      await onJoinTeam(teamCode, teamName, teamRole)
+    } catch (error) {
+      setTeamMessage(error instanceof Error ? error.message : 'Could not join this team mission.')
+    } finally {
+      setJoiningTeam(false)
+    }
+  }
+
   return (
     <main className="relative isolate flex min-h-screen items-center justify-center overflow-hidden bg-black px-4 py-12 text-slate-100 sm:px-6">
       <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_50%_0%,rgba(255,255,255,0.08),transparent_52%)]" />
@@ -108,6 +130,61 @@ export function HomeScreen({
             </span>
           </button>
         </div>
+
+        <form
+          onSubmit={submitTeamCode}
+          className="mt-5 grid gap-3 rounded-2xl border border-cyan-200/15 bg-[#07111d] p-4 sm:grid-cols-[1fr_1fr_1fr_auto] sm:items-end"
+          aria-label="Join a team mission"
+        >
+          <div className="sm:col-span-4">
+            <h2 className="text-sm font-semibold text-white">Join a team mission</h2>
+            <p className="mt-1 text-xs text-slate-400">Enter a teammate’s code to join their active Mission Mode session. Teams can have up to four people.</p>
+          </div>
+          <label className="text-[9px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+            Team code
+            <input
+              required
+              value={teamCode}
+              onChange={(event) => {
+                setTeamCode(event.target.value.toUpperCase().replace(/[^A-F0-9]/g, '').slice(0, 8))
+                setTeamMessage(null)
+              }}
+              maxLength={8}
+              placeholder="8-character code"
+              autoComplete="off"
+              className="mt-1 block w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm tracking-[0.18em] text-white placeholder:tracking-normal placeholder:text-slate-600"
+            />
+          </label>
+          <label className="text-[9px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+            Your name
+            <input
+              required
+              value={teamName}
+              onChange={(event) => setTeamName(event.target.value.slice(0, 24))}
+              maxLength={24}
+              placeholder="Team member"
+              className="mt-1 block w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm normal-case tracking-normal text-white placeholder:text-slate-600"
+            />
+          </label>
+          <label className="text-[9px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+            Your role
+            <select
+              value={teamRole}
+              onChange={(event) => setTeamRole(event.target.value as TeamMissionRole)}
+              className="mt-1 block w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm normal-case tracking-normal text-white"
+            >
+              {teamMissionRoles.map((role) => <option key={role}>{role}</option>)}
+            </select>
+          </label>
+          <button
+            type="submit"
+            disabled={joiningTeam || teamCode.length !== 8 || !teamName.trim()}
+            className="rounded-lg bg-cyan-200 px-4 py-2.5 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {joiningTeam ? 'Joining…' : 'Join mission'}
+          </button>
+          {teamMessage && <p className="text-xs text-rose-200 sm:col-span-4" role="status">{teamMessage}</p>}
+        </form>
 
         <p className="mt-8 text-center text-[10px] uppercase tracking-[0.2em] text-slate-500">
           Existing spacecraft, engineering systems, telemetry, and real-time launch simulation

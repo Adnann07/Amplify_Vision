@@ -23,7 +23,13 @@ import {
 } from 'three'
 import type { RefObject } from 'react'
 import type { SequencePhase } from './launchSequenceState'
-import { MARS_SURFACE_OPERATIONS_TIME, ORBITAL_INSERTION_TIME } from './launchSequenceState'
+import {
+  isMarsRoverDeployed,
+  isMarsSurfaceScenePhase,
+  MARS_ROVER_DEPLOYMENT_PROGRESS,
+  MARS_SURFACE_OPERATIONS_TIME,
+  ORBITAL_INSERTION_TIME,
+} from './launchSequenceState'
 import { clamp01, lerp, smoothstep } from './proceduralMath'
 
 interface MarsLandingSceneProps {
@@ -34,6 +40,7 @@ interface MarsLandingSceneProps {
   phase: SequencePhase
   payloadRef: RefObject<Group | null>
   modelRef: RefObject<Group | null>
+  entryVehicleRef: RefObject<Group | null>
   extrasRef: RefObject<Group | null>
   planetRef: RefObject<Group | null>
   skyRef: RefObject<Group | null>
@@ -43,7 +50,6 @@ interface MarsLandingSceneProps {
 }
 
 const ENTRY_BLEND = 0.12
-const TOUCHDOWN_PROGRESS = 0.88
 const TRACK_POINT_COUNT = 70
 
 function terrainHeight(x: number, z: number) {
@@ -118,6 +124,7 @@ export function MarsLandingScene({
   phase,
   payloadRef,
   modelRef,
+  entryVehicleRef,
   extrasRef,
   planetRef,
   skyRef,
@@ -128,7 +135,8 @@ export function MarsLandingScene({
   const { camera, scene } = useThree()
   const world = useRef<Group>(null)
   const surface = useRef<Group>(null)
-  const entryCapsule = useRef<Group>(null)
+  const entryStartPosition = useRef<Vector3 | null>(null)
+  const entryStartRotation = useRef<Euler | null>(null)
   const surfaceCraft = useRef<Group>(null)
   const proxyRotorLower = useRef<Group>(null)
   const proxyRotorUpper = useRef<Group>(null)
@@ -169,7 +177,7 @@ export function MarsLandingScene({
     () => new MeshStandardMaterial({ color: '#704638', roughness: 1, flatShading: true }),
     [],
   )
-  const landingActive = phase === 'surface_landing' || phase === 'surface_operations'
+  const landingActive = isMarsSurfaceScenePhase(phase)
   const localLanding = landingActive && startedAt !== null
 
   useEffect(() => {
@@ -191,24 +199,37 @@ export function MarsLandingScene({
         (MARS_SURFACE_OPERATIONS_TIME - ORBITAL_INSERTION_TIME),
     )
     const localProgress = clamp01((progress - ENTRY_BLEND) / (1 - ENTRY_BLEND))
-    const descent = smoothstep(0.08, 0.88, localProgress)
+    const descent = smoothstep(0.08, MARS_ROVER_DEPLOYMENT_PROGRESS, localProgress)
     const surfaceScale = Math.max(0.8, Math.min(2.4, destinationRadius / 31))
 
     root.position.copy(destinationCenter)
     root.scale.setScalar(surfaceScale)
     root.visible = true
     if (surface.current) surface.current.visible = progress >= ENTRY_BLEND
-    if (entryCapsule.current) {
-      entryCapsule.current.visible = progress < ENTRY_BLEND
-      if (payload) {
-        entryCapsule.current.position.copy(payload.position).sub(destinationCenter)
-        entryCapsule.current.lookAt(destinationCenter)
-      }
-    }
 
     if (progress < ENTRY_BLEND) {
-      if (payload) payload.visible = true
+      if (payload) {
+        if (!entryStartPosition.current) {
+          entryStartPosition.current = payload.position.clone()
+          entryStartRotation.current = payload.rotation.clone()
+        }
+        const approachBlend = smoothstep(0, ENTRY_BLEND, progress)
+        const entryPosition = new Vector3(
+          destinationCenter.x,
+          destinationCenter.y + 118 * surfaceScale,
+          destinationCenter.z,
+        )
+        payload.position.lerpVectors(entryStartPosition.current, entryPosition, approachBlend)
+        payload.scale.setScalar(surfaceScale)
+        payload.rotation.set(
+          lerp(entryStartRotation.current?.x ?? 0, 0, approachBlend),
+          lerp(entryStartRotation.current?.y ?? 0, 0, approachBlend),
+          lerp(entryStartRotation.current?.z ?? 0, 0, approachBlend),
+        )
+        payload.visible = true
+      }
       if (model) model.visible = false
+      if (entryVehicleRef.current) entryVehicleRef.current.visible = true
       if (extrasRef.current) extrasRef.current.visible = false
       if (parachute.current) parachute.current.visible = false
       if (heatShield.current) heatShield.current.visible = false
@@ -218,8 +239,13 @@ export function MarsLandingScene({
 
     if (payload) payload.visible = true
     const hasRenderableModel = Boolean(model?.getObjectByProperty('isMesh', true))
-    if (model) model.visible = hasRenderableModel
-    if (surfaceCraft.current) surfaceCraft.current.visible = !hasRenderableModel
+    const roverDeployed = isMarsRoverDeployed(phase, localProgress)
+    if (model) model.visible = hasRenderableModel && roverDeployed
+    if (entryVehicleRef.current) {
+      entryVehicleRef.current.visible = !roverDeployed
+      entryVehicleRef.current.position.set(0, 5, 0)
+    }
+    if (surfaceCraft.current) surfaceCraft.current.visible = !hasRenderableModel && roverDeployed
     if (extrasRef.current) extrasRef.current.visible = false
     if (planetRef.current) planetRef.current.visible = false
     if (skyRef.current) skyRef.current.visible = false
@@ -242,14 +268,16 @@ export function MarsLandingScene({
     const roverRoute = Math.max(0, (elapsed - MARS_SURFACE_OPERATIONS_TIME) * 1.35)
     let x = 0
     let z = 0
-    let y = terrainHeight(0, 0) + 4.2
+    let y = terrainHeight(0, 0)
+    let heading = 0
 
     if (spacecraftId === 'perseverance') {
       const driveDistance = Math.min(58, roverRoute)
       x = Math.sin(driveDistance * 0.018) * 13
       z = -driveDistance
-      y = terrainHeight(x, z) + 4.2
-      if (model) model.rotation.set(0, Math.sin(driveDistance * 0.018) * 0.3, 0)
+      y = terrainHeight(x, z)
+      heading = Math.sin(driveDistance * 0.018) * 0.3
+      if (model) model.rotation.set(0, 0, 0)
       updateTracks(trackLeft.current, -2.1, driveDistance, x, z)
       updateTracks(trackRight.current, 2.1, driveDistance, x, z)
     } else {
@@ -259,8 +287,9 @@ export function MarsLandingScene({
       const flightZ = -12 - Math.cos(flightTime * 0.3) * 9
       x = lerp(0, flightX, flightBlend)
       z = lerp(0, flightZ, flightBlend)
-      y = terrainHeight(x, z) + lerp(4.2, 9 + Math.sin(flightTime * 2) * 1.1, flightBlend)
-      if (model) model.rotation.set(Math.sin(flightTime * 0.8) * 0.06, Math.sin(flightTime * 0.45) * 0.22, 0)
+      y = terrainHeight(x, z) + lerp(0, 5 + Math.sin(flightTime * 2) * 1.1, flightBlend)
+      heading = Math.sin(flightTime * 0.45) * 0.22
+      if (model) model.rotation.set(Math.sin(flightTime * 0.8) * 0.06, 0, 0)
       if (payload && !ingFirstRotor.current) {
         ingFirstRotor.current = payload.getObjectByName('rotors_01') ?? null
       }
@@ -271,23 +300,26 @@ export function MarsLandingScene({
       if (ingSecondRotor.current) ingSecondRotor.current.rotation.y -= delta * 42
     }
 
-    const touchdownY = terrainHeight(x, z) + 4.2
+    const touchdownY = terrainHeight(x, z)
     const stackY = lerp(118, touchdownY, descent)
-    const lowerBody = smoothstep(TOUCHDOWN_PROGRESS - 0.035, TOUCHDOWN_PROGRESS + 0.015, localProgress)
-    const hoverHeight = spacecraftId === 'ingenuity' && phase === 'surface_operations'
+    const lowerBody = smoothstep(
+      MARS_ROVER_DEPLOYMENT_PROGRESS - 0.035,
+      MARS_ROVER_DEPLOYMENT_PROGRESS + 0.015,
+      localProgress,
+    )
+    const payloadHeight = spacecraftId === 'ingenuity' && phase === 'surface_operations'
       ? y
       : lerp(stackY, y, lowerBody)
-    const heading = model?.rotation.y ?? 0
     if (payload) {
       payload.position.set(
         destinationCenter.x + x * surfaceScale,
-        destinationCenter.y + hoverHeight * surfaceScale,
+        destinationCenter.y + payloadHeight * surfaceScale,
         destinationCenter.z + z * surfaceScale,
       )
       payload.scale.setScalar(surfaceScale)
       payload.rotation.set(0, heading, 0)
     }
-    if (model) model.position.set(0, hoverHeight - 4.2, 0)
+    if (model) model.position.set(0, spacecraftId === 'perseverance' ? 5 * (1 - lowerBody) : 0, 0)
     if (surfaceCraft.current) {
       surfaceCraft.current.position.set(x, terrainHeight(x, z), z)
       surfaceCraft.current.rotation.set(0, heading, 0)
@@ -327,13 +359,13 @@ export function MarsLandingScene({
       })
     }
 
-    const localCameraTarget = new Vector3(x, hoverHeight + 1.5, z)
+    const localCameraTarget = new Vector3(x, payloadHeight + 1.5, z)
     const cameraOffset = spacecraftId === 'perseverance'
       ? new Vector3(28, 23, 42)
       : new Vector3(24, 20, 36)
     const targetCamera = new Vector3(
       destinationCenter.x + (x + cameraOffset.x) * surfaceScale,
-      destinationCenter.y + (hoverHeight + cameraOffset.y) * surfaceScale,
+      destinationCenter.y + (payloadHeight + cameraOffset.y) * surfaceScale,
       destinationCenter.z + (z + cameraOffset.z) * surfaceScale,
     )
     camera.position.lerp(targetCamera, 1 - Math.exp(-delta * 2.4))
@@ -358,16 +390,6 @@ export function MarsLandingScene({
         </mesh>
       </group>
       <instancedMesh ref={rocks} args={[rockGeometry, rockMaterial, rockTransforms.length]} castShadow receiveShadow />
-      </group>
-      <group ref={entryCapsule} visible={false}>
-        <mesh>
-          <capsuleGeometry args={[1.8, 3.5, 5, 12]} />
-          <meshStandardMaterial color="#d3d0c8" metalness={0.46} roughness={0.42} />
-        </mesh>
-        <mesh position={[0, -1.6, 0]} rotation={[Math.PI / 2, 0, 0]}>
-          <circleGeometry args={[2, 20]} />
-          <meshStandardMaterial color="#b94e31" roughness={0.65} />
-        </mesh>
       </group>
       <group ref={surfaceCraft} visible={false}>
         {spacecraftId === 'perseverance' ? (
