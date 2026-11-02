@@ -21,6 +21,7 @@ Amplify Vision brings mission planning, spacecraft configuration, launch visuali
 - [A visual tour](#a-visual-tour)
 - [What you can do](#what-you-can-do)
 - [2026 NASA Space Apps Challenge alignment](#2026-nasa-space-apps-challenge-alignment)
+- [Challenge statement coverage](#challenge-statement-coverage)
 - [NASA, JPL, NOAA, and USGS data integrations](#nasa-jpl-noaa-and-usgs-data-integrations)
 - [Juno around Jupiter: ephemeris and playback](#juno-around-jupiter-ephemeris-and-playback)
 - [NASA 3D models and assets](#nasa-3d-models-and-assets)
@@ -329,7 +330,7 @@ The available roles are Mission lead, Engineer, Scientist, and Communications. R
 
 ## 2026 NASA Space Apps Challenge alignment
 
-The challenge asks players to experience the connected decisions involved in planning, building, launching, operating, and evaluating a space mission. Amplify Vision addresses those areas through the following existing game systems:
+The [2026 NASA Space Apps Challenge: Space Mission Design Game](https://www.spaceappschallenge.org/2026/challenges/space-mission-design-game/) calls for an interactive experience where participants design, manage, and simulate a complete space mission. It emphasizes making engineering decisions with limited resources, seeing how choices affect one another, and learning from mission outcomes. Amplify Vision addresses those areas through the following existing game systems:
 
 | Challenge area | How Amplify Vision addresses it |
 | --- | --- |
@@ -357,6 +358,14 @@ The challenge describes possible features, not a requirement to model every real
 - There is no global leaderboard, competitive team ranking, or persistent cross-server team-room storage. Team rooms are temporary and process-local as described above.
 
 These boundaries distinguish implemented features from optional challenge ideas and keep the simulator's educational claims aligned with what the application actually models.
+
+## Challenge statement coverage
+
+Space mission design brings science goals, spacecraft and instruments, launch and orbital choices, operations, and finite resources together in one system. An improvement in one area can create a cost elsewhere: for example, adding a capable instrument can increase science value while also requiring more mass, power, budget, and data capacity. Amplify Vision makes these connected decisions part of an interactive, repeatable mission experience rather than treating spacecraft design, launch, and operations as unrelated topics.
+
+Players choose or explore a mission objective, review its requirements, configure a compatible spacecraft and science payload, choose a launch vehicle, assess design constraints, launch, operate the mission, and review the result. Mission Mode provides structured scenarios with prerequisites and difficulty labels; Freeplay provides a configurable sandbox. Design tests and post-mission assessments explain constraints and outcomes, so a failed test or mission can inform another attempt rather than simply ending experimentation.
+
+The experience is intended to make mission concepts approachable through mission briefings, visible resource values, actionable warnings, visualizations, and explanations of scoring. It models key trade-offs across mass, power, budget, science capability, communications, storage/data, and operational time. These are educational abstractions, not complete engineering models: for example, orbital planning, spacecraft lifetime, data capacity, and subsystem behavior are not flight-qualified simulations. Collaboration is available for up to four people in shared post-deployment operations, with distinct roles, while design and launch are not simultaneous multiplayer activities. The coverage table at the end of this README maps the challenge's goals and considerations to implemented features and identifies meaningful limits.
 
 ## Architecture
 
@@ -598,3 +607,18 @@ Tests cover engineering/data utilities, mission state and scoring, campaign prog
 ---
 
 **NASA, JPL, NOAA, USGS, and other referenced agencies retain their respective names, marks, data, and asset rights. Amplify Vision is an independent educational project.**
+
+## Challenge statement feature coverage
+
+| Challenge statement focus | Relevant Amplify Vision features | Coverage and scope |
+| --- | --- | --- |
+| Design, manage, and simulate a complete mission | Mission Mode campaign, Freeplay, spacecraft builder, launch experience, Mission Control operations, and post-mission assessment | Connects mission planning through operations and evaluation in one game loop; the underlying engineering and mission outcomes are simplified educational models. |
+| Define a mission objective and requirements | Campaign objectives, mission-specific requirements, briefings, and optional live-event design exercises | Players select from provided objectives and requirements; there is no general-purpose objective or constraint authoring tool. |
+| Configure a spacecraft and scientific instruments | Model-backed spacecraft presets and compatible propulsion, power, communications, payload, camera, spectrometer, and radar options | Choices affect modeled fit, mass, power, cost, communications, reliability, and science capability; this is not a detailed model of every possible subsystem such as onboard computers or attitude control. |
+| Experience consequential engineering trade-offs | Builder calculations and warnings, mission design tests, mission-specific constraints, and score explanations | Surfaces trade-offs among science value, mass, power, budget, and other modeled limits; results are deterministic game rules, not flight design analysis. |
+| Choose a launch vehicle and consider orbit | Launch vehicle selection with capacity and cost; date-specific planetary map and preliminary transfer estimate | Presents launch and planetary context. The planner does not let players design an orbit, select a launch window, or propagate a spacecraft trajectory. |
+| Manage limited mission resources | Build and operations views for mass, budget, power, communications, generated science data, storage, and elapsed mission time | Resource indicators and operational controls are available; Mission Control does not model a real ground network or a spacecraft's complete lifetime. |
+| Operate, repeat, and evaluate missions | Launch and operations simulation, observation scheduling, instrument/power controls, downlink queue, mission report, scoring, and campaign progression | Players can inspect results and revise or retry. Campaign scoring does not separately reward team coordination or Mission Control observations and downlinks. |
+| Collaborate with up to four participants | Shareable team code, four roles, and synchronized Mission Control session | Supports one host and up to three teammates in post-deployment operations; spacecraft design and launch are not collaborative real-time workflows, and roles do not enforce permissions. |
+| Learn through clear feedback and visualizations | Mission briefings, actionable warnings, score breakdowns, spacecraft and planetary visualizations, telemetry, and reference imagery | Helps explain why choices affect mission performance while distinguishing real agency data from simulated spacecraft state. Mission-specific tutorial lessons are not currently provided. |
+| Explore varied scenarios and optional game mechanics | 27 campaign missions, difficulty labels, Freeplay, and eligible live-event exercises | Offers multiple mission types and a sandbox. Random events, leaderboards, competitive team rankings, and persistent cross-server team rooms are not implemented. |
